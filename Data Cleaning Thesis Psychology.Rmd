@@ -1,0 +1,879 @@
+---
+title: "New Psychology Thesis 26.06"
+author: "Anna Langener"
+date: "6/26/2020"
+output: html_document
+---
+
+```{r, include=FALSE}
+library("qgraph")
+library("dplyr")
+library("psych")
+library("graphicalVAR")
+library("psychonetrics")
+library("lavaan")
+library('ltm')
+library("semPlot")
+library('tidyr')
+library('ggplot2')
+library("ggcorrplot")
+library("readxl")
+
+
+
+setwd('/Users/annalangener/surfdrive/Data Thesis/Data Final Thesis')
+
+## Load all Financial Diaries
+
+Financial.diary_long1 <- read_excel("/Users/annalangener/surfdrive/Data Thesis/Data Final Thesis/Financial diaries GR5+GR6.xlsx")
+#Financial.diary_long2 <- read_excel("/Users/annalangener/surfdrive/Data Thesis/Data Final Thesis/financial diaries gr8.xlsx") We received an updated version
+Financial.diary_long3 <- read_excel("/Users/annalangener/surfdrive/Data Thesis/Data Final Thesis/financial diaries gr15.xlsx")
+Financial.diary_long4 <- read_excel("/Users/annalangener/surfdrive/Data Thesis/Data Final Thesis/financial diaries gr19.xlsx")
+Financial.diary_long5 <- read_excel("/Users/annalangener/surfdrive/Data Thesis/Data Final Thesis/financial diaries gr20.xlsx")
+Financial.diary_long6 <- read_excel("/Users/annalangener/surfdrive/Data Thesis/Data Final Thesis/financial diaries gr25.xlsx")
+Financial.diary_long7 <- read_excel("/Users/annalangener/surfdrive/Data Thesis/Data Final Thesis/financial diaries gr26.xlsx")
+
+# Combine them in long format
+Financial.diary_longA <- rbind(Financial.diary_long1,Financial.diary_long3,Financial.diary_long4,Financial.diary_long5,Financial.diary_long6,Financial.diary_long7)
+
+#New diaries: Group 8,12,28,11 
+Financial.diary_long8 <- read_excel("/Users/annalangener/surfdrive/Data Thesis/Data Final Thesis/DiariesOutputGR7.xlsx")
+Financial.diary_long2 <- read_excel("/Users/annalangener/surfdrive/Data Thesis/Data Final Thesis/DiariesOutputGR8.xlsx")
+Financial.diary_long9 <- read_excel("/Users/annalangener/surfdrive/Data Thesis/Data Final Thesis/DiariesOutputGR12.xlsx")
+Financial.diary_long10 <- read_excel("/Users/annalangener/surfdrive/Data Thesis/Data Final Thesis/DiariesOutputGR11.xlsx")
+
+#I don't use the financial diaries from group 28 since we do not have the correct ID number for the monthly questionnaires (and they just started so we don't have more than 1 or 2 rounds anyway)
+#Financial.diary_long11 <- read_excel("/Users/annalangener/surfdrive/Data Thesis/Data Final Thesis/DiariesOutputGR28.xlsx")
+
+# Combine them in long format
+Financial.diary_longB <- rbind(Financial.diary_long2, Financial.diary_long8, Financial.diary_long9, Financial.diary_long10)
+
+#Combine old and new diaries
+Financial.diary_long <- full_join(Financial.diary_longA, Financial.diary_longB)
+
+# Transfer them to wide format
+Financial.diary <- Financial.diary_long[,-c(4,5,6)]
+Financial.diary <- Financial.diary[!is.na(Financial.diary$ID_NR_VU),]
+Financial.diary <- spread(Financial.diary, Item, Amount)
+Financial.diary[is.na(Financial.diary)] <- 0
+Financial.diary <- Financial.diary[Financial.diary$Weeknr != 0,] #Week 0 somehow was incomplete
+
+
+
+Financial.diary <- Financial.diary[!is.na(Financial.diary$ID_NR_VU),]
+Financial.diary <- Financial.diary[!is.na(Financial.diary$Weeknr),]
+
+### Load Baseline and monthly survey
+
+All_Rwanda <- as.data.frame(read.csv2("/Users/annalangener/surfdrive/Data Thesis/Data Final Thesis/All_Rwanda_data_cleaned_06042020.csv", header = TRUE, na.strings = c(""," ","NA")))
+All_Rwanda <- All_Rwanda[All_Rwanda$ID_NR_VU != 41,] #Remove observation 41
+
+All_Rwanda_BaselineN <- as.data.frame(read_excel("/Users/annalangener/surfdrive/Data Thesis/Data Final Thesis/Baseline 10072020.xlsx"))
+
+All_Rwanda_EndlineN <- as.data.frame(read_excel("/Users/annalangener/surfdrive/Data Thesis/Data Final Thesis/Endline 10072020.xlsx"))
+
+All_Rwanda_BaselineN$ID_NR_VU <- 9999 #Because no ID number yet
+All_Rwanda_EndlineN<- All_Rwanda_EndlineN[All_Rwanda_EndlineN$ID_NR_VU != 41,] #Remove observation 41
+
+
+##Transfrom Date
+
+All_Rwanda$Cstartdate <- stringr::str_split_fixed(All_Rwanda$Cstartdate, " ", 2)[,1]
+All_Rwanda$Cstartdate <- as.Date(All_Rwanda$Cstartdate, "%d.%m.%y")
+All_Rwanda$StartMonth <- format(as.Date(All_Rwanda$Cstartdate), "%m")
+All_Rwanda$Cstartdate <- format(as.Date(All_Rwanda$Cstartdate), "%Y%m")
+
+All_Rwanda_BaselineN$Cstartdate <- as.Date(All_Rwanda_BaselineN$Date, "%d-%m-%y")
+All_Rwanda_BaselineN$StartMonth <- format(as.Date(All_Rwanda_BaselineN$Cstartdate), "%m")
+All_Rwanda_BaselineN$Cstartdate <- format(as.Date(All_Rwanda_BaselineN$Cstartdate), "%Y%m")
+
+All_Rwanda_EndlineN$Cstartdate <- as.Date(All_Rwanda_EndlineN$Date, "%d-%m-%y")
+All_Rwanda_EndlineN$StartMonth <- format(as.Date(All_Rwanda_EndlineN$Cstartdate), "%m")
+All_Rwanda_EndlineN$Cstartdate <- format(as.Date(All_Rwanda_EndlineN$Cstartdate), "%Y%m")
+
+## Load Inflation Rate
+Inflation <- as.data.frame(read.csv2("/Users/annalangener/surfdrive/Data Thesis/Data Final Thesis/Inflation.csv", header = T))
+Inflation$Date <- as.Date(Inflation$Date, "%d.%m.%y")
+Inflation$Date <- format(as.Date(Inflation$Date), "%Y%m")
+Inflation$Cstartdate <- Inflation$Date 
+```
+
+
+## Data Preperation
+Variables that we need: social support, income, empowerment, mental wellbeing, food security, personal health, household health, wealth (personal assets), and child morality
+```{r, include=FALSE}
+#Empowerment
+#(1) Myself   (2) Husband/partner  (3) Myself and my husband/partner jointly (4) Someone else in the family
+All_Rwanda$hermoney <- recode(All_Rwanda$hermoney, "Myself" = 3, "Husband/partner" = 1, "Myself and my husband/partner jointly" = 2, "Someone else in the family" = 1)
+All_Rwanda$decisionfam <-recode(All_Rwanda$decisionfam, "Myself" = 3, "Husband/partner" = 1, "Myself and my husband/partner jointly" = 2, "Someone else in the family" = 1)
+All_Rwanda$hhpurchases <- recode(All_Rwanda$hhpurchases, "Myself" = 3, "Husband/partner" = 1, "Myself and my husband/partner jointly" = 2, "Someone else in the family" = 1)
+
+#Psychological Wellbeing
+All_Rwanda$psychwellbeing_1 <- recode(All_Rwanda$psychwellbeing_1,"Never" = 3, "Sometimes" = 2, "Often" = 1)
+All_Rwanda$psychwellbeing_2 <- recode(All_Rwanda$psychwellbeing_2,"Never" = 1, "Sometimes" = 2, "Often" = 3)
+All_Rwanda$psychwellbeing_3 <- recode(All_Rwanda$psychwellbeing_3,"Never" = 3, "Sometimes" = 2, "Often" = 1)
+All_Rwanda$psychwellbeing_5 <- recode(All_Rwanda$psychwellbeing_5,"Never" = 1, "Sometimes" = 2, "Often" = 3)
+
+#
+All_Rwanda$schoolatt <-  recode(All_Rwanda$schoolatt,"Pre-primary (Nursery)" = 1, "Primary" = 2, "Secondary" = 3, "Vocational" = 4, "Tertiary" = 4)
+
+All_Rwanda$ill <-  recode(All_Rwanda$ill,"No" = 0, "Yes" = 1)
+All_Rwanda$illotherHHM <-  recode(All_Rwanda$illotherHHM,"No" = 0, "Yes" = 1)
+All_Rwanda$childmortality <- recode(All_Rwanda$childmortality,"No" = 0, "Yes" = 1)
+
+All_Rwanda$mealsperday <-  as.numeric(recode(All_Rwanda$mealsperday,">3" = 4, "3" = 3, "2" = 2, "1" = 1))
+
+#Savings per months, per week, per day
+All_Rwanda$savinghowmuch_1[which(All_Rwanda$savinghowmuch_1 == "Question skipped")] <- NA 
+All_Rwanda$savinghowmuch_2[which(All_Rwanda$savinghowmuch_2 == "Question skipped")] <- NA
+All_Rwanda$savinghowmuch_3[which(All_Rwanda$savinghowmuch_3 == "Question skipped")] <- NA
+
+All_Rwanda$savinghowmuch_1 <- as.numeric(All_Rwanda$savinghowmuch_1) 
+All_Rwanda$savinghowmuch_2 <- as.numeric(All_Rwanda$savinghowmuch_2) 
+All_Rwanda$savinghowmuch_3 <- as.numeric(All_Rwanda$savinghowmuch_3) 
+
+All_Rwanda$debtamount_1[which(All_Rwanda$debtamount_1 == "Question skipped")] <- NA 
+All_Rwanda$debtamount_1 <- as.numeric(All_Rwanda$debtamount_1) 
+
+## Education
+All_Rwanda$school2 <- recode(All_Rwanda$school,"Yes" = 1, "No" = 0)
+All_Rwanda$schoolatt2 <- recode(All_Rwanda$schoolatt, "Pre-primary (Nursery)" = 1,  "Primary" = 2, "Secondary" = 3, "Tertiary"  = 4, "Vocational" = 5)
+All_Rwanda$schoolcompleted <- recode(All_Rwanda$schoolcompleted,"None" = 0, "Pre-primary (Nursery)" = 1,  "Primary" = 2, "Secondary" = 3, "Tertiary"  = 4, "Vocational" = 5)
+
+
+###partner
+All_Rwanda$HusbandPartnerSameHousehold <- NA
+All_Rwanda$HusbandPartnerSameHousehold[All_Rwanda$partner == "<b>Husband</b> who lives in same household" |All_Rwanda$partner == "<b>Partner</b> who lives in the same household"] <- 1
+All_Rwanda$HusbandPartnerSameHousehold[All_Rwanda$partner != "<b>Husband</b> who lives in same household" & All_Rwanda$partner != "<b>Partner</b> who lives in the same household"] <- 0
+
+All_Rwanda$HusbandPartnerNotSameHousehold <- NA
+All_Rwanda$HusbandPartnerNotSameHousehold[All_Rwanda$partner == "<b>Husband</b> who does not currently live in household" |All_Rwanda$partner == "<b>Partner</b> who does not currently live in the household"] <- 1
+All_Rwanda$HusbandPartnerNotSameHousehold[All_Rwanda$partner != "<b>Husband</b> who does not currently live in household" & All_Rwanda$partner != "<b>Partner</b> who does not currently live in the household"] <- 0
+
+All_Rwanda$NoPartner <- NA
+All_Rwanda$NoPartner[All_Rwanda$partner == "No husband/partner"] <- 1
+All_Rwanda$NoPartner[All_Rwanda$partner != "No husband/partner"] <- 0
+
+All_Rwanda$PartnerDied  <- NA
+All_Rwanda$PartnerDied[All_Rwanda$partner == "Husband/partner has died"]  <- 1
+All_Rwanda$PartnerDied[All_Rwanda$partner != "Husband/partner has died"]  <- 0
+
+
+##### For Sample description
+All_Rwanda$savinghowmuch_1[which(All_Rwanda$savinghowmuch_1 == "Question skipped")] <- NA 
+All_Rwanda$savinghowmuch_2[which(All_Rwanda$savinghowmuch_2 == "Question skipped")] <- NA
+All_Rwanda$savinghowmuch_3[which(All_Rwanda$savinghowmuch_3 == "Question skipped")] <- NA
+
+All_Rwanda$savinghowmuch_1 <- as.numeric(All_Rwanda$savinghowmuch_1) 
+All_Rwanda$savinghowmuch_2 <- as.numeric(All_Rwanda$savinghowmuch_2) 
+All_Rwanda$savinghowmuch_3 <- as.numeric(All_Rwanda$savinghowmuch_3) 
+
+All_Rwanda$debtamount_1[which(All_Rwanda$debtamount_1 == "Question skipped")] <- NA 
+All_Rwanda$debtamount_1 <- as.numeric(All_Rwanda$debtamount_1) 
+
+#Productive Assets
+All_Rwanda$prod1 <- recode(All_Rwanda$assetsmatrix1_1, "Yes" = 1, "No" = 0)
+All_Rwanda$prod2 <- recode(All_Rwanda$assetsmatrix1_2, "Yes" = 1, "No" = 0)
+All_Rwanda$prod3 <- recode(All_Rwanda$assetsmatrix1_3, "Yes" = 1, "No" = 0)
+All_Rwanda$prod4 <- recode(All_Rwanda$assetsmatrix1_4, "Yes" = 1, "No" = 0)
+All_Rwanda$prod5 <- recode(All_Rwanda$assetsmatrix1_5, "Yes" = 1, "No" = 0)
+All_Rwanda$prod6 <- recode(All_Rwanda$assetsmatrix1_6, "Yes" = 1, "No" = 0)
+
+for(i in 1:nrow(All_Rwanda)){
+All_Rwanda$prodsum[i] <- sum(All_Rwanda$prod1[i],All_Rwanda$prod2[i],All_Rwanda$prod3[i],All_Rwanda$prod4[i],All_Rwanda$prod5[i])
+}
+
+###Livestock
+All_Rwanda$livestock1 <- recode(All_Rwanda$livestocknumbers_1, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+All_Rwanda$livestock2 <- recode(All_Rwanda$livestocknumbers_2, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+All_Rwanda$livestock3 <- recode(All_Rwanda$livestocknumbers_3, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+All_Rwanda$livestock4 <- recode(All_Rwanda$livestocknumbers_4, "Yes" = 1, "No" = 0)
+All_Rwanda$livestock5 <- recode(All_Rwanda$livestocknumbers_5, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+All_Rwanda$livestock6 <- recode(All_Rwanda$livestocknumbers_6, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+All_Rwanda$livestock7 <- recode(All_Rwanda$livestocknumbers_7, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+All_Rwanda$livestock8 <- recode(All_Rwanda$livestocknumbers_8, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+All_Rwanda$livestock9 <- recode(All_Rwanda$livestocknumbers_9, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+All_Rwanda$livestock10 <- recode(All_Rwanda$livestocknumbers_10, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+All_Rwanda$livestock11 <- recode(All_Rwanda$livestocknumbers_11, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+
+for(i in 1:nrow(All_Rwanda)){
+All_Rwanda$livestocksum[i] <- sum(All_Rwanda$livestock1[i],All_Rwanda$livestock3[i],All_Rwanda$livestock5[i], All_Rwanda$livestock6[i], All_Rwanda$livestock7[i])
+}
+
+## Education
+All_Rwanda$schoolcompleted <- recode(All_Rwanda$schoolcompleted,"None" = 0, "Pre-primary (Nursery)" = 1,  "Primary" = 2, "Secondary" = 3, "Tertiary"  = 4, "Vocational" = 5)
+
+
+## Occupation
+# Informal Business
+# Farming
+# Causal labour/ No occupation
+All_Rwanda$Basketsmaker <- 0
+All_Rwanda$Basketsmaker[All_Rwanda$occupationmain == "Baskets maker"] <- 1
+All_Rwanda$Basketsmaker[is.na(All_Rwanda$occupationmain)] <- NA
+
+All_Rwanda$Daylabourer <- 0
+All_Rwanda$Daylabourer[All_Rwanda$occupationmain == "Day labourer" ] <- 1
+All_Rwanda$Daylabourer[is.na(All_Rwanda$occupationmain)] <- NA
+
+All_Rwanda$Farmer <- 0
+All_Rwanda$Farmer[All_Rwanda$occupationmain == "Farmer not on own land" | All_Rwanda$occupationmain == "Farmer on own land"| All_Rwanda$occupationmain == "Farmer, crops on own land" | All_Rwanda$occupationmain == "Farmer, crops on rented land" | All_Rwanda$occupationmain == "Farmer, livestock on own land" | All_Rwanda$occupationmain == "Farmer, livestock on rented land"  ] <- 1
+All_Rwanda$Farmer[is.na(All_Rwanda$occupationmain)] <- NA
+
+
+All_Rwanda$Handcraft <- 0
+All_Rwanda$Handcraft[All_Rwanda$occupationmain == "Handcraft maker"  ] <- 1
+All_Rwanda$Handcraft[is.na(All_Rwanda$occupationmain)] <- NA
+
+All_Rwanda$MakingSellingBeer <- 0
+All_Rwanda$MakingSellingBeer[All_Rwanda$occupationmain == "Making and selling beer"] <- 1
+All_Rwanda$MakingSellingBeer[is.na(All_Rwanda$occupationmain)] <- NA
+
+All_Rwanda$MakingRepairClothes <- 0
+All_Rwanda$MakingRepairClothes[All_Rwanda$occupationmain == "Making/ repairing clothes" ] <- 1
+All_Rwanda$MakingRepairClothes[is.na(All_Rwanda$occupationmain)] <- NA
+
+
+All_Rwanda$MarketVendor <- 0
+All_Rwanda$MarketVendor[All_Rwanda$occupationmain == "Market vendor"] <- 1
+All_Rwanda$MarketVendor[is.na(All_Rwanda$occupationmain)] <- NA
+
+All_Rwanda$NoOccupation <- 0
+All_Rwanda$NoOccupation[All_Rwanda$occupationmain == "No occupation"] <- 1
+All_Rwanda$NoOccupation[is.na(All_Rwanda$occupationmain)] <- NA
+
+All_Rwanda$MakingSellingFood <- 0
+All_Rwanda$MakingSellingFood[All_Rwanda$occupationmain == "Restaurant /making and selling food"] <- 1
+All_Rwanda$MakingSellingFood[is.na(All_Rwanda$occupationmain)] <- NA
+        
+All_Rwanda$Shopkeeper <- 0
+All_Rwanda$Shopkeeper[All_Rwanda$occupationmain == "Shopkeeper"] <- 1
+All_Rwanda$Shopkeeper[is.na(All_Rwanda$occupationmain)] <- NA
+ 
+All_Rwanda$StreetVendor <- 0
+All_Rwanda$StreetVendor[All_Rwanda$occupationmain == "Street vendor"] <- 1
+All_Rwanda$StreetVendor[is.na(All_Rwanda$occupationmain)] <- NA
+ 
+
+## New Categories
+All_Rwanda$InformalWork <- 0
+All_Rwanda$InformalWork[All_Rwanda$occupationmain == "Street vendor" | All_Rwanda$occupationmain == "Shopkeeper" | All_Rwanda$occupationmain == "Market vendor" | All_Rwanda$occupationmain == "Making/ repairing clothes"] <- 1
+
+
+# Causal labour/ No occupation
+All_Rwanda$NoOccupation_Daylabourer <- 0
+All_Rwanda$NoOccupation_Daylabourer[All_Rwanda$occupationmain == "Day labourer" | All_Rwanda$occupationmain == "No occupation" ] <- 1
+
+#Farmer
+
+## HHsize
+
+##Insurance
+All_Rwanda$insurance2 <- recode(All_Rwanda$insurance, "Don't know" = -1, "No" = 0, "Yes, commercial/privately purchased health insurance" = 1, "Yes, MMI" = 1, "Yes, mutuelle or community based health insurance" = 1,"Yes, Rama/RSSB" = 1)
+All_Rwanda$insurance2[All_Rwanda$insurance2 == -1] <- NA
+```
+
+```{r, include=FALSE}
+
+#Empowerment
+#(1) Myself   (2) Husband/partner  (3) Myself and my husband/partner jointly (4) Someone else in the family
+All_Rwanda_BaselineN$hermoney <- recode(All_Rwanda_BaselineN$hermoney, "Myself" = 3, "Husband/partner" = 1, "Myself and my husband/partner jointly" = 2, "Another household member" = 1, "Someone else in the family" = 1)
+All_Rwanda_BaselineN$decisionfam <-recode(All_Rwanda_BaselineN$decisionfam, "Myself" = 3, "Husband/partner" = 1, "Myself and my husband/partner jointly" = 2, "Another household member" = 1, "Someone else in the family" = 1)
+All_Rwanda_BaselineN$hhpurchases <- recode(All_Rwanda_BaselineN$hhpurchases, "Myself" = 3, "Husband/partner" = 1, "Myself and my husband/partner jointly" = 2, "Another household member" = 1, "Someone else in the family" = 1)
+All_Rwanda_BaselineN$hismoney <- recode(All_Rwanda_BaselineN$hismoney, "Myself" = 3, "Husband/partner" = 1, "Myself and my husband/partner jointly" = 2, "Another household member" = 1, "Someone else in the family" = 1)
+All_Rwanda_BaselineN$decisionmaking_1 <- recode(All_Rwanda_BaselineN$decisionmaking_1, "Myself" = 3, "Husband/partner" = 1, "Myself and my husband/partner jointly" = 2, "Another household member" = 1, "Someone else in the family" = 1)
+All_Rwanda_BaselineN$decisionmaking_2 <- recode(All_Rwanda_BaselineN$decisionmaking_2, "Myself" = 3, "Husband/partner" = 1, "Myself and my husband/partner jointly" = 2, "Another household member" = 1, "Someone else in the family" = 1)
+All_Rwanda_BaselineN$decisionmaking_3 <- recode(All_Rwanda_BaselineN$decisionmaking_3, "Myself" = 3, "Husband/partner" = 1, "Myself and my husband/partner jointly" = 2, "Another household member" = 1, "Someone else in the family" = 1)
+All_Rwanda_BaselineN$decisionmaking_4 <- recode(All_Rwanda_BaselineN$decisionmaking_4, "Myself" = 3, "Husband/partner" = 1, "Myself and my husband/partner jointly" = 2, "Another household member" = 1, "Someone else in the family" = 1)
+
+# Stereotypes
+All_Rwanda_BaselineN$stereotypes_1 <-recode(All_Rwanda_BaselineN$stereotypes_1,"Yes" = 1, "No" = 0)
+All_Rwanda_BaselineN$stereotypes_2 <-recode(All_Rwanda_BaselineN$stereotypes_2,"Yes" = 1, "No" = 0)
+All_Rwanda_BaselineN$stereotypes_3 <-recode(All_Rwanda_BaselineN$stereotypes_3,"Yes" = 1, "No" = 0)
+All_Rwanda_BaselineN$stereotypes_4 <-recode(All_Rwanda_BaselineN$stereotypes_4,"Yes" = 1, "No" = 0)
+
+
+# Social Support
+All_Rwanda_BaselineN$socialsupport_1 <-recode(All_Rwanda_BaselineN$socialsupport_1,"Yes" = 1, "No" = 0)
+All_Rwanda_BaselineN$socialsupport_2 <-recode(All_Rwanda_BaselineN$socialsupport_2,"Yes" = 1, "No" = 0)
+All_Rwanda_BaselineN$socialsupport_3 <-recode(All_Rwanda_BaselineN$socialsupport_3,"Yes" = 1, "No" = 0)
+All_Rwanda_BaselineN$socialsupport_4 <-recode(All_Rwanda_BaselineN$socialsupport_4,"Yes" = 1, "No" = 0)
+
+
+#Psychological Wellbeing
+All_Rwanda_BaselineN$psychwellbeing_1 <-recode(All_Rwanda_BaselineN$psychwellbeing_1,"Never" = 3, "Sometimes" = 2, "Often" = 1)
+All_Rwanda_BaselineN$psychwellbeing_2 <- recode(All_Rwanda_BaselineN$psychwellbeing_2,"Never" = 1, "Sometimes" = 2, "Often" = 3)
+All_Rwanda_BaselineN$psychwellbeing_3 <- recode(All_Rwanda_BaselineN$psychwellbeing_3,"Never" = 3, "Sometimes" = 2, "Often" = 1)
+All_Rwanda_BaselineN$psychwellbeing_5 <- recode(All_Rwanda_BaselineN$psychwellbeing_5,"Never" = 1, "Sometimes" = 2, "Often" = 3)
+All_Rwanda_BaselineN$psychwellbeing_4 <- recode(All_Rwanda_BaselineN$psychwellbeing_4,"Never" = 1, "Sometimes" = 2, "Often" = 3)
+All_Rwanda_BaselineN$psychwellbeing_6 <- recode(All_Rwanda_BaselineN$psychwellbeing_6,"Never" = 1, "Sometimes" = 2, "Often" = 3)
+All_Rwanda_BaselineN$psychwellbeing2_1 <- recode(All_Rwanda_BaselineN$psychwellbeing2_1,"Never" = 1, "Sometimes" = 2, "Often" = 3)
+All_Rwanda_BaselineN$psychwellbeing2_2 <- recode(All_Rwanda_BaselineN$psychwellbeing2_2,"Never" = 3, "Sometimes" = 2, "Often" = 1)
+All_Rwanda_BaselineN$psychwellbeing2_3 <- recode(All_Rwanda_BaselineN$psychwellbeing2_3,"Never" = 1, "Sometimes" = 2, "Often" = 3)
+All_Rwanda_BaselineN$psychwellbeing2_4 <- recode(All_Rwanda_BaselineN$psychwellbeing2_4,"Never" = 3, "Sometimes" = 2, "Often" = 1)
+All_Rwanda_BaselineN$psychwellbeing2_5 <- recode(All_Rwanda_BaselineN$psychwellbeing2_5,"Never" = 3, "Sometimes" = 2, "Often" = 1)
+All_Rwanda_BaselineN$psychwellbeing2_6 <- recode(All_Rwanda_BaselineN$psychwellbeing2_6,"Never" = 3, "Sometimes" = 2, "Often" = 1)
+
+
+
+All_Rwanda_BaselineN$schoolatt <-  recode(All_Rwanda_BaselineN$schoolatt,"Pre-primary (Nursery)" = 1, "Primary" = 2, "Secondary" = 3, "Vocational" = 4, "Tertiary" = 4)
+
+All_Rwanda_BaselineN$childmortality <- recode(All_Rwanda_BaselineN$childmortality,"No" = 0, "Yes" = 1)
+
+All_Rwanda_BaselineN$mealsperday <-  as.numeric(recode(All_Rwanda_BaselineN$mealsperday,">3" = 4, "3" = 3, "2" = 2, "1" = 1))
+
+#Savings per months, per week, per day
+All_Rwanda_BaselineN$savinghowmuch_1[which(All_Rwanda_BaselineN$savinghowmuch_1 == "Question skipped")] <- NA 
+All_Rwanda_BaselineN$savinghowmuch_2[which(All_Rwanda_BaselineN$savinghowmuch_2 == "Question skipped")] <- NA
+All_Rwanda_BaselineN$savinghowmuch_3[which(All_Rwanda_BaselineN$savinghowmuch_3 == "Question skipped")] <- NA
+
+All_Rwanda_BaselineN$savinghowmuch_1 <- as.numeric(All_Rwanda_BaselineN$savinghowmuch_1) 
+All_Rwanda_BaselineN$savinghowmuch_2 <- as.numeric(All_Rwanda_BaselineN$savinghowmuch_2) 
+All_Rwanda_BaselineN$savinghowmuch_3 <- as.numeric(All_Rwanda_BaselineN$savinghowmuch_3) 
+
+All_Rwanda_BaselineN$debtamount_1[which(All_Rwanda_BaselineN$debtamount_1 == "Question skipped")] <- NA 
+All_Rwanda_BaselineN$debtamount_1 <- as.numeric(All_Rwanda_BaselineN$debtamount_1) 
+
+
+###partner
+All_Rwanda_BaselineN$HusbandPartnerSameHousehold <- NA
+All_Rwanda_BaselineN$HusbandPartnerSameHousehold[All_Rwanda_BaselineN$partner == "<b>Husband</b> who lives in same household" |All_Rwanda_BaselineN$partner == "<b>Partner</b> who lives in the same household"] <- 1
+All_Rwanda_BaselineN$HusbandPartnerSameHousehold[All_Rwanda_BaselineN$partner != "<b>Husband</b> who lives in same household" & All_Rwanda_BaselineN$partner != "<b>Partner</b> who lives in the same household"] <- 0
+
+All_Rwanda_BaselineN$HusbandPartnerNotSameHousehold <- NA
+All_Rwanda_BaselineN$HusbandPartnerNotSameHousehold[All_Rwanda_BaselineN$partner == "<b>Husband</b> who does not currently live in household" |All_Rwanda_BaselineN$partner == "<b>Partner</b> who does not currently live in the household"] <- 1
+All_Rwanda_BaselineN$HusbandPartnerNotSameHousehold[All_Rwanda_BaselineN$partner != "<b>Husband</b> who does not currently live in household" & All_Rwanda_BaselineN$partner != "<b>Partner</b> who does not currently live in the household"] <- 0
+
+All_Rwanda_BaselineN$NoPartner <- NA
+All_Rwanda_BaselineN$NoPartner[All_Rwanda_BaselineN$partner == "No husband/partner"] <- 1
+All_Rwanda_BaselineN$NoPartner[All_Rwanda_BaselineN$partner != "No husband/partner"] <- 0
+
+All_Rwanda_BaselineN$PartnerDied  <- NA
+All_Rwanda_BaselineN$PartnerDied[All_Rwanda_BaselineN$partner == "Husband/partner has died"]  <- 1
+All_Rwanda_BaselineN$PartnerDied[All_Rwanda_BaselineN$partner != "Husband/partner has died"]  <- 0
+
+
+##### For Sample description
+All_Rwanda_BaselineN$savinghowmuch_1[which(All_Rwanda_BaselineN$savinghowmuch_1 == "Question skipped")] <- NA 
+All_Rwanda_BaselineN$savinghowmuch_2[which(All_Rwanda_BaselineN$savinghowmuch_2 == "Question skipped")] <- NA
+All_Rwanda_BaselineN$savinghowmuch_3[which(All_Rwanda_BaselineN$savinghowmuch_3 == "Question skipped")] <- NA
+
+All_Rwanda_BaselineN$savinghowmuch_1 <- as.numeric(All_Rwanda_BaselineN$savinghowmuch_1) 
+All_Rwanda_BaselineN$savinghowmuch_2 <- as.numeric(All_Rwanda_BaselineN$savinghowmuch_2) 
+All_Rwanda_BaselineN$savinghowmuch_3 <- as.numeric(All_Rwanda_BaselineN$savinghowmuch_3) 
+
+All_Rwanda_BaselineN$debtamount_1[which(All_Rwanda_BaselineN$debtamount_1 == "Question skipped")] <- NA 
+All_Rwanda_BaselineN$debtamount_1 <- as.numeric(All_Rwanda_BaselineN$debtamount_1) 
+
+#Productive Assets
+All_Rwanda_BaselineN$prod1 <- recode(All_Rwanda_BaselineN$assetsmatrix1_1, "Yes" = 1, "No" = 0)
+All_Rwanda_BaselineN$prod2 <- recode(All_Rwanda_BaselineN$assetsmatrix1_2, "Yes" = 1, "No" = 0)
+All_Rwanda_BaselineN$prod3 <- recode(All_Rwanda_BaselineN$assetsmatrix1_3, "Yes" = 1, "No" = 0)
+All_Rwanda_BaselineN$prod4 <- recode(All_Rwanda_BaselineN$assetsmatrix1_4, "Yes" = 1, "No" = 0)
+All_Rwanda_BaselineN$prod5 <- recode(All_Rwanda_BaselineN$assetsmatrix1_5, "Yes" = 1, "No" = 0)
+All_Rwanda_BaselineN$prod6 <- recode(All_Rwanda_BaselineN$assetsmatrix1_6, "Yes" = 1, "No" = 0)
+
+for(i in 1:nrow(All_Rwanda_BaselineN)){
+All_Rwanda_BaselineN$prodsum[i] <- sum(All_Rwanda_BaselineN$prod1[i],All_Rwanda_BaselineN$prod2[i],All_Rwanda_BaselineN$prod3[i],All_Rwanda_BaselineN$prod4[i],All_Rwanda_BaselineN$prod5[i])
+}
+
+###Livestock
+All_Rwanda_BaselineN$livestock1 <- recode(All_Rwanda_BaselineN$livestocknumbers_1, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+#All_Rwanda_BaselineN$livestock2 <- recode(All_Rwanda_BaselineN$livestocknumbers_2, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+All_Rwanda_BaselineN$livestock3 <- recode(All_Rwanda_BaselineN$livestocknumbers_3, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+All_Rwanda_BaselineN$livestock4 <- recode(All_Rwanda_BaselineN$livestocknumbers_4, "Yes" = 1, "No" = 0)
+All_Rwanda_BaselineN$livestock5 <- recode(All_Rwanda_BaselineN$livestocknumbers_5, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+All_Rwanda_BaselineN$livestock6 <- recode(All_Rwanda_BaselineN$livestocknumbers_6, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+All_Rwanda_BaselineN$livestock7 <- recode(All_Rwanda_BaselineN$livestocknumbers_7, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+All_Rwanda_BaselineN$livestock8 <- recode(All_Rwanda_BaselineN$livestocknumbers_8, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+#All_Rwanda_BaselineN$livestock9 <- recode(All_Rwanda_BaselineN$livestocknumbers_9, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+#All_Rwanda_BaselineN$livestock10 <- recode(All_Rwanda_BaselineN$livestocknumbers_10, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+#All_Rwanda_BaselineN$livestock11 <- recode(All_Rwanda_BaselineN$livestocknumbers_11, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+
+for(i in 1:nrow(All_Rwanda_BaselineN)){
+All_Rwanda_BaselineN$livestocksum[i] <- sum(All_Rwanda_BaselineN$livestock1[i],All_Rwanda_BaselineN$livestock3[i],All_Rwanda_BaselineN$livestock5[i], All_Rwanda_BaselineN$livestock6[i], All_Rwanda_BaselineN$livestock7[i])
+}
+
+## Education
+All_Rwanda_BaselineN$schoolcompleted <- recode(All_Rwanda_BaselineN$schoolcompleted,"None" = 0, "Pre-primary (Nursery)" = 1,  "Primary" = 2, "Secondary" = 3, "Tertiary"  = 4, "Vocational" = 5)
+
+
+## Occupation
+# Informal Business
+# Farming
+# Causal labour/ No occupation
+All_Rwanda_BaselineN$Basketsmaker <- 0
+All_Rwanda_BaselineN$Basketsmaker[All_Rwanda_BaselineN$occupationmain == "Baskets maker"] <- 1
+All_Rwanda_BaselineN$Basketsmaker[is.na(All_Rwanda_BaselineN$occupationmain)] <- NA
+
+All_Rwanda_BaselineN$Daylabourer <- 0
+All_Rwanda_BaselineN$Daylabourer[All_Rwanda_BaselineN$occupationmain == "Day labourer" ] <- 1
+All_Rwanda_BaselineN$Daylabourer[is.na(All_Rwanda_BaselineN$occupationmain)] <- NA
+
+All_Rwanda_BaselineN$Farmer <- 0
+All_Rwanda_BaselineN$Farmer[All_Rwanda_BaselineN$occupationmain == "Farmer not on own land" | All_Rwanda_BaselineN$occupationmain == "Farmer on own land"| All_Rwanda_BaselineN$occupationmain == "Farmer, crops on own land" | All_Rwanda_BaselineN$occupationmain == "Farmer, crops on rented land" | All_Rwanda_BaselineN$occupationmain == "Farmer, livestock on own land" | All_Rwanda_BaselineN$occupationmain == "Farmer, livestock on rented land"  ] <- 1
+All_Rwanda_BaselineN$Farmer[is.na(All_Rwanda_BaselineN$occupationmain)] <- NA
+
+
+All_Rwanda_BaselineN$Handcraft <- 0
+All_Rwanda_BaselineN$Handcraft[All_Rwanda_BaselineN$occupationmain == "Handcraft maker"  ] <- 1
+All_Rwanda_BaselineN$Handcraft[is.na(All_Rwanda_BaselineN$occupationmain)] <- NA
+
+All_Rwanda_BaselineN$MakingSellingBeer <- 0
+All_Rwanda_BaselineN$MakingSellingBeer[All_Rwanda_BaselineN$occupationmain == "Making and selling beer"] <- 1
+All_Rwanda_BaselineN$MakingSellingBeer[is.na(All_Rwanda_BaselineN$occupationmain)] <- NA
+
+All_Rwanda_BaselineN$MakingRepairClothes <- 0
+All_Rwanda_BaselineN$MakingRepairClothes[All_Rwanda_BaselineN$occupationmain == "Making/ repairing clothes" ] <- 1
+All_Rwanda_BaselineN$MakingRepairClothes[is.na(All_Rwanda_BaselineN$occupationmain)] <- NA
+
+
+All_Rwanda_BaselineN$MarketVendor <- 0
+All_Rwanda_BaselineN$MarketVendor[All_Rwanda_BaselineN$occupationmain == "Market vendor"] <- 1
+All_Rwanda_BaselineN$MarketVendor[is.na(All_Rwanda_BaselineN$occupationmain)] <- NA
+
+All_Rwanda_BaselineN$NoOccupation <- 0
+All_Rwanda_BaselineN$NoOccupation[All_Rwanda_BaselineN$occupationmain == "No occupation"] <- 1
+All_Rwanda_BaselineN$NoOccupation[is.na(All_Rwanda_BaselineN$occupationmain)] <- NA
+
+All_Rwanda_BaselineN$MakingSellingFood <- 0
+All_Rwanda_BaselineN$MakingSellingFood[All_Rwanda_BaselineN$occupationmain == "Restaurant /making and selling food"] <- 1
+All_Rwanda_BaselineN$MakingSellingFood[is.na(All_Rwanda_BaselineN$occupationmain)] <- NA
+        
+All_Rwanda_BaselineN$Shopkeeper <- 0
+All_Rwanda_BaselineN$Shopkeeper[All_Rwanda_BaselineN$occupationmain == "Shopkeeper"] <- 1
+All_Rwanda_BaselineN$Shopkeeper[is.na(All_Rwanda_BaselineN$occupationmain)] <- NA
+ 
+All_Rwanda_BaselineN$StreetVendor <- 0
+All_Rwanda_BaselineN$StreetVendor[All_Rwanda_BaselineN$occupationmain == "Street vendor"] <- 1
+All_Rwanda_BaselineN$StreetVendor[is.na(All_Rwanda_BaselineN$occupationmain)] <- NA
+ 
+
+## New Categories
+All_Rwanda_BaselineN$InformalWork <- 0
+All_Rwanda_BaselineN$InformalWork[All_Rwanda_BaselineN$occupationmain == "Street vendor" | All_Rwanda_BaselineN$occupationmain == "Shopkeeper" | All_Rwanda_BaselineN$occupationmain == "Market vendor" | All_Rwanda_BaselineN$occupationmain == "Making/ repairing clothes"] <- 1
+
+
+# Causal labour/ No occupation
+All_Rwanda_BaselineN$NoOccupation_Daylabourer <- 0
+All_Rwanda_BaselineN$NoOccupation_Daylabourer[All_Rwanda_BaselineN$occupationmain == "Day labourer" | All_Rwanda_BaselineN$occupationmain == "No occupation" ] <- 1
+
+#Farmer
+
+## HHsize
+
+##Insurance
+All_Rwanda_BaselineN$insurance2 <- recode(All_Rwanda_BaselineN$insurance, "Don't know" = -1, "No" = 0, "Yes, commercial/privately purchased health insurance" = 1, "Yes, MMI" = 1, "Yes, mutuelle or community based health insurance" = 1,"Yes, Rama/RSSB" = 1)
+All_Rwanda_BaselineN$insurance2[All_Rwanda_BaselineN$insurance2 == -1] <- NA
+
+
+
+#### Match with other dataset
+
+unique(All_Rwanda_BaselineN$groupselRWA)
+
+All_Rwanda_BaselineN$Rgroupnr <- recode(All_Rwanda_BaselineN$groupselRWA,"group 38" = "RWA038", "group 30"  = "RWA030", "group 29" = "RWA029", "group 39" = "RWA039", "group 35" = "RWA035", "group 33" = "RWA033","group 34" = "RWA034", "group 36" = "RWA036", "group 31" = "RWA031", "group 37" = "RWA037", "group 32" = "RWA032", "group 28" = "RWA028")
+
+```
+
+```{r, include=FALSE}
+
+#Empowerment
+#(1) Myself   (2) Husband/partner  (3) Myself and my husband/partner jointly (4) Someone else in the family
+All_Rwanda_EndlineN$hermoney <- recode(All_Rwanda_EndlineN$hermoney, "Myself" = 3, "Husband/partner" = 1, "Myself and my husband/partner jointly" = 2, "Another household member" = 1, "Someone else in the family" = 1)
+All_Rwanda_EndlineN$decisionfam <-recode(All_Rwanda_EndlineN$decisionfam, "Myself" = 3, "Husband/partner" = 1, "Myself and my husband/partner jointly" = 2, "Another household member" = 1, "Someone else in the family" = 1)
+All_Rwanda_EndlineN$hhpurchases <- recode(All_Rwanda_EndlineN$hhpurchases, "Myself" = 3, "Husband/partner" = 1, "Myself and my husband/partner jointly" = 2, "Another household member" = 1, "Someone else in the family" = 1)
+All_Rwanda_EndlineN$hismoney <- recode(All_Rwanda_EndlineN$hismoney, "Myself" = 3, "Husband/partner" = 1, "Myself and my husband/partner jointly" = 2, "Another household member" = 1, "Someone else in the family" = 1)
+All_Rwanda_EndlineN$decisionmaking_1 <- recode(All_Rwanda_EndlineN$decisionmaking_1, "Myself" = 3, "Husband/partner" = 1, "Myself and my husband/partner jointly" = 2, "Another household member" = 1, "Someone else in the family" = 1)
+All_Rwanda_EndlineN$decisionmaking_2 <- recode(All_Rwanda_EndlineN$decisionmaking_2, "Myself" = 3, "Husband/partner" = 1, "Myself and my husband/partner jointly" = 2, "Another household member" = 1, "Someone else in the family" = 1)
+All_Rwanda_EndlineN$decisionmaking_3 <- recode(All_Rwanda_EndlineN$decisionmaking_3, "Myself" = 3, "Husband/partner" = 1, "Myself and my husband/partner jointly" = 2, "Another household member" = 1, "Someone else in the family" = 1)
+All_Rwanda_EndlineN$decisionmaking_4 <- recode(All_Rwanda_EndlineN$decisionmaking_4, "Myself" = 3, "Husband/partner" = 1, "Myself and my husband/partner jointly" = 2, "Another household member" = 1, "Someone else in the family" = 1)
+
+# Stereotypes
+All_Rwanda_EndlineN$stereotypes_1 <-recode(All_Rwanda_EndlineN$stereotypes_1,"Yes" = 1, "No" = 0)
+All_Rwanda_EndlineN$stereotypes_2 <-recode(All_Rwanda_EndlineN$stereotypes_2,"Yes" = 1, "No" = 0)
+All_Rwanda_EndlineN$stereotypes_3 <-recode(All_Rwanda_EndlineN$stereotypes_3,"Yes" = 1, "No" = 0)
+All_Rwanda_EndlineN$stereotypes_4 <-recode(All_Rwanda_EndlineN$stereotypes_4,"Yes" = 1, "No" = 0)
+
+
+# Social Support
+All_Rwanda_EndlineN$socialsupport_1 <-recode(All_Rwanda_EndlineN$socialsupport_1,"Yes" = 1, "No" = 0)
+All_Rwanda_EndlineN$socialsupport_2 <-recode(All_Rwanda_EndlineN$socialsupport_2,"Yes" = 1, "No" = 0)
+All_Rwanda_EndlineN$socialsupport_3 <-recode(All_Rwanda_EndlineN$socialsupport_3,"Yes" = 1, "No" = 0)
+All_Rwanda_EndlineN$socialsupport_4 <-recode(All_Rwanda_EndlineN$socialsupport_4,"Yes" = 1, "No" = 0)
+
+
+#Psychological Wellbeing
+All_Rwanda_EndlineN$psychwellbeing_1 <-recode(All_Rwanda_EndlineN$psychwellbeing_1,"Never" = 3, "Sometimes" = 2, "Often" = 1)
+All_Rwanda_EndlineN$psychwellbeing_2 <- recode(All_Rwanda_EndlineN$psychwellbeing_2,"Never" = 1, "Sometimes" = 2, "Often" = 3)
+All_Rwanda_EndlineN$psychwellbeing_3 <- recode(All_Rwanda_EndlineN$psychwellbeing_3,"Never" = 3, "Sometimes" = 2, "Often" = 1)
+All_Rwanda_EndlineN$psychwellbeing_5 <- recode(All_Rwanda_EndlineN$psychwellbeing_5,"Never" = 1, "Sometimes" = 2, "Often" = 3)
+All_Rwanda_EndlineN$psychwellbeing_4 <- recode(All_Rwanda_EndlineN$psychwellbeing_4,"Never" = 1, "Sometimes" = 2, "Often" = 3)
+All_Rwanda_EndlineN$psychwellbeing_6 <- recode(All_Rwanda_EndlineN$psychwellbeing_6,"Never" = 1, "Sometimes" = 2, "Often" = 3)
+All_Rwanda_EndlineN$psychwellbeing2_1 <- recode(All_Rwanda_EndlineN$psychwellbeing2_1,"Never" = 1, "Sometimes" = 2, "Often" = 3)
+All_Rwanda_EndlineN$psychwellbeing2_2 <- recode(All_Rwanda_EndlineN$psychwellbeing2_2,"Never" = 3, "Sometimes" = 2, "Often" = 1)
+All_Rwanda_EndlineN$psychwellbeing2_3 <- recode(All_Rwanda_EndlineN$psychwellbeing2_3,"Never" = 1, "Sometimes" = 2, "Often" = 3)
+All_Rwanda_EndlineN$psychwellbeing2_4 <- recode(All_Rwanda_EndlineN$psychwellbeing2_4,"Never" = 3, "Sometimes" = 2, "Often" = 1)
+All_Rwanda_EndlineN$psychwellbeing2_5 <- recode(All_Rwanda_EndlineN$psychwellbeing2_5,"Never" = 3, "Sometimes" = 2, "Often" = 1)
+All_Rwanda_EndlineN$psychwellbeing2_6 <- recode(All_Rwanda_EndlineN$psychwellbeing2_6,"Never" = 3, "Sometimes" = 2, "Often" = 1)
+
+
+
+All_Rwanda_EndlineN$schoolatt <-  recode(All_Rwanda_EndlineN$schoolatt,"Pre-primary (Nursery)" = 1, "Primary" = 2, "Secondary" = 3, "Vocational" = 4, "Tertiary" = 4)
+
+All_Rwanda_EndlineN$childmortality <- recode(All_Rwanda_EndlineN$childmortality,"No" = 0, "Yes" = 1)
+
+All_Rwanda_EndlineN$mealsperday <-  as.numeric(recode(All_Rwanda_EndlineN$mealsperday,">3" = 4, "3" = 3, "2" = 2, "1" = 1))
+
+#Savings per months, per week, per day
+All_Rwanda_EndlineN$savinghowmuch_1[which(All_Rwanda_EndlineN$savinghowmuch_1 == "Question skipped")] <- NA 
+All_Rwanda_EndlineN$savinghowmuch_2[which(All_Rwanda_EndlineN$savinghowmuch_2 == "Question skipped")] <- NA
+All_Rwanda_EndlineN$savinghowmuch_3[which(All_Rwanda_EndlineN$savinghowmuch_3 == "Question skipped")] <- NA
+
+All_Rwanda_EndlineN$savinghowmuch_1 <- as.numeric(All_Rwanda_EndlineN$savinghowmuch_1) 
+All_Rwanda_EndlineN$savinghowmuch_2 <- as.numeric(All_Rwanda_EndlineN$savinghowmuch_2) 
+All_Rwanda_EndlineN$savinghowmuch_3 <- as.numeric(All_Rwanda_EndlineN$savinghowmuch_3) 
+
+All_Rwanda_EndlineN$debtamount_1[which(All_Rwanda_EndlineN$debtamount_1 == "Question skipped")] <- NA 
+All_Rwanda_EndlineN$debtamount_1 <- as.numeric(All_Rwanda_EndlineN$debtamount_1) 
+
+
+###partner
+All_Rwanda_EndlineN$HusbandPartnerSameHousehold <- NA
+All_Rwanda_EndlineN$HusbandPartnerSameHousehold[All_Rwanda_EndlineN$partner == "<b>Husband</b> who lives in same household" |All_Rwanda_EndlineN$partner == "<b>Partner</b> who lives in the same household"] <- 1
+All_Rwanda_EndlineN$HusbandPartnerSameHousehold[All_Rwanda_EndlineN$partner != "<b>Husband</b> who lives in same household" & All_Rwanda_EndlineN$partner != "<b>Partner</b> who lives in the same household"] <- 0
+
+All_Rwanda_EndlineN$HusbandPartnerNotSameHousehold <- NA
+All_Rwanda_EndlineN$HusbandPartnerNotSameHousehold[All_Rwanda_EndlineN$partner == "<b>Husband</b> who does not currently live in household" |All_Rwanda_EndlineN$partner == "<b>Partner</b> who does not currently live in the household"] <- 1
+All_Rwanda_EndlineN$HusbandPartnerNotSameHousehold[All_Rwanda_EndlineN$partner != "<b>Husband</b> who does not currently live in household" & All_Rwanda_EndlineN$partner != "<b>Partner</b> who does not currently live in the household"] <- 0
+
+All_Rwanda_EndlineN$NoPartner <- NA
+All_Rwanda_EndlineN$NoPartner[All_Rwanda_EndlineN$partner == "No husband/partner"] <- 1
+All_Rwanda_EndlineN$NoPartner[All_Rwanda_EndlineN$partner != "No husband/partner"] <- 0
+
+All_Rwanda_EndlineN$PartnerDied  <- NA
+All_Rwanda_EndlineN$PartnerDied[All_Rwanda_EndlineN$partner == "Husband/partner has died"]  <- 1
+All_Rwanda_EndlineN$PartnerDied[All_Rwanda_EndlineN$partner != "Husband/partner has died"]  <- 0
+
+
+##### For Sample description
+All_Rwanda_EndlineN$savinghowmuch_1[which(All_Rwanda_EndlineN$savinghowmuch_1 == "Question skipped")] <- NA 
+All_Rwanda_EndlineN$savinghowmuch_2[which(All_Rwanda_EndlineN$savinghowmuch_2 == "Question skipped")] <- NA
+All_Rwanda_EndlineN$savinghowmuch_3[which(All_Rwanda_EndlineN$savinghowmuch_3 == "Question skipped")] <- NA
+
+All_Rwanda_EndlineN$savinghowmuch_1 <- as.numeric(All_Rwanda_EndlineN$savinghowmuch_1) 
+All_Rwanda_EndlineN$savinghowmuch_2 <- as.numeric(All_Rwanda_EndlineN$savinghowmuch_2) 
+All_Rwanda_EndlineN$savinghowmuch_3 <- as.numeric(All_Rwanda_EndlineN$savinghowmuch_3) 
+
+All_Rwanda_EndlineN$debtamount_1[which(All_Rwanda_EndlineN$debtamount_1 == "Question skipped")] <- NA 
+All_Rwanda_EndlineN$debtamount_1 <- as.numeric(All_Rwanda_EndlineN$debtamount_1) 
+
+#Productive Assets
+All_Rwanda_EndlineN$prod1 <- recode(All_Rwanda_EndlineN$assetsmatrix1_1, "Yes" = 1, "No" = 0)
+All_Rwanda_EndlineN$prod2 <- recode(All_Rwanda_EndlineN$assetsmatrix1_2, "Yes" = 1, "No" = 0)
+All_Rwanda_EndlineN$prod3 <- recode(All_Rwanda_EndlineN$assetsmatrix1_3, "Yes" = 1, "No" = 0)
+All_Rwanda_EndlineN$prod4 <- recode(All_Rwanda_EndlineN$assetsmatrix1_4, "Yes" = 1, "No" = 0)
+All_Rwanda_EndlineN$prod5 <- recode(All_Rwanda_EndlineN$assetsmatrix1_5, "Yes" = 1, "No" = 0)
+All_Rwanda_EndlineN$prod6 <- recode(All_Rwanda_EndlineN$assetsmatrix1_6, "Yes" = 1, "No" = 0)
+
+for(i in 1:nrow(All_Rwanda_EndlineN)){
+All_Rwanda_EndlineN$prodsum[i] <- sum(All_Rwanda_EndlineN$prod1[i],All_Rwanda_EndlineN$prod2[i],All_Rwanda_EndlineN$prod3[i],All_Rwanda_EndlineN$prod4[i],All_Rwanda_EndlineN$prod5[i])
+}
+
+###Livestock
+All_Rwanda_EndlineN$livestock1 <- recode(All_Rwanda_EndlineN$livestocknumbers_1, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+#All_Rwanda_EndlineN$livestock2 <- recode(All_Rwanda_EndlineN$livestocknumbers_2, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+All_Rwanda_EndlineN$livestock3 <- recode(All_Rwanda_EndlineN$livestocknumbers_3, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+#All_Rwanda_EndlineN$livestock4 <- recode(All_Rwanda_EndlineN$livestocknumbers_4, "Yes" = 1, "No" = 0)
+All_Rwanda_EndlineN$livestock5 <- recode(All_Rwanda_EndlineN$livestocknumbers_5, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+All_Rwanda_EndlineN$livestock6 <- recode(All_Rwanda_EndlineN$livestocknumbers_6, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+All_Rwanda_EndlineN$livestock7 <- recode(All_Rwanda_EndlineN$livestocknumbers_7, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+All_Rwanda_EndlineN$livestock8 <- recode(All_Rwanda_EndlineN$livestocknumbers_8, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+#All_Rwanda_EndlineN$livestock9 <- recode(All_Rwanda_EndlineN$livestocknumbers_9, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+#All_Rwanda_EndlineN$livestock10 <- recode(All_Rwanda_EndlineN$livestocknumbers_10, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+#All_Rwanda_EndlineN$livestock11 <- recode(All_Rwanda_EndlineN$livestocknumbers_11, "6" = 6, "5" = 5, "4" = 4, "3" = 3, "2" = 2, "1" = 1, "0" = 0)
+
+for(i in 1:nrow(All_Rwanda_EndlineN)){
+All_Rwanda_EndlineN$livestocksum[i] <- sum(All_Rwanda_EndlineN$livestock1[i],All_Rwanda_EndlineN$livestock3[i],All_Rwanda_EndlineN$livestock5[i], All_Rwanda_EndlineN$livestock6[i], All_Rwanda_EndlineN$livestock7[i])
+}
+
+## Education
+All_Rwanda_EndlineN$schoolcompleted <- recode(All_Rwanda_EndlineN$schoolcompleted,"None" = 0, "Pre-primary (Nursery)" = 1,  "Primary" = 2, "Secondary" = 3, "Tertiary"  = 4, "Vocational" = 5)
+
+
+## Occupation
+# Informal Business
+# Farming
+# Causal labour/ No occupation
+All_Rwanda_EndlineN$Basketsmaker <- 0
+All_Rwanda_EndlineN$Basketsmaker[All_Rwanda_EndlineN$occupationmain == "Baskets maker"] <- 1
+All_Rwanda_EndlineN$Basketsmaker[is.na(All_Rwanda_EndlineN$occupationmain)] <- NA
+
+All_Rwanda_EndlineN$Daylabourer <- 0
+All_Rwanda_EndlineN$Daylabourer[All_Rwanda_EndlineN$occupationmain == "Day labourer" ] <- 1
+All_Rwanda_EndlineN$Daylabourer[is.na(All_Rwanda_EndlineN$occupationmain)] <- NA
+
+All_Rwanda_EndlineN$Farmer <- 0
+All_Rwanda_EndlineN$Farmer[All_Rwanda_EndlineN$occupationmain == "Farmer not on own land" | All_Rwanda_EndlineN$occupationmain == "Farmer on own land"| All_Rwanda_EndlineN$occupationmain == "Farmer, crops on own land" | All_Rwanda_EndlineN$occupationmain == "Farmer, crops on rented land" | All_Rwanda_EndlineN$occupationmain == "Farmer, livestock on own land" | All_Rwanda_EndlineN$occupationmain == "Farmer, livestock on rented land"  ] <- 1
+All_Rwanda_EndlineN$Farmer[is.na(All_Rwanda_EndlineN$occupationmain)] <- NA
+
+
+All_Rwanda_EndlineN$Handcraft <- 0
+All_Rwanda_EndlineN$Handcraft[All_Rwanda_EndlineN$occupationmain == "Handcraft maker"  ] <- 1
+All_Rwanda_EndlineN$Handcraft[is.na(All_Rwanda_EndlineN$occupationmain)] <- NA
+
+All_Rwanda_EndlineN$MakingSellingBeer <- 0
+All_Rwanda_EndlineN$MakingSellingBeer[All_Rwanda_EndlineN$occupationmain == "Making and selling beer"] <- 1
+All_Rwanda_EndlineN$MakingSellingBeer[is.na(All_Rwanda_EndlineN$occupationmain)] <- NA
+
+All_Rwanda_EndlineN$MakingRepairClothes <- 0
+All_Rwanda_EndlineN$MakingRepairClothes[All_Rwanda_EndlineN$occupationmain == "Making/ repairing clothes" ] <- 1
+All_Rwanda_EndlineN$MakingRepairClothes[is.na(All_Rwanda_EndlineN$occupationmain)] <- NA
+
+
+All_Rwanda_EndlineN$MarketVendor <- 0
+All_Rwanda_EndlineN$MarketVendor[All_Rwanda_EndlineN$occupationmain == "Market vendor"] <- 1
+All_Rwanda_EndlineN$MarketVendor[is.na(All_Rwanda_EndlineN$occupationmain)] <- NA
+
+All_Rwanda_EndlineN$NoOccupation <- 0
+All_Rwanda_EndlineN$NoOccupation[All_Rwanda_EndlineN$occupationmain == "No occupation"] <- 1
+All_Rwanda_EndlineN$NoOccupation[is.na(All_Rwanda_EndlineN$occupationmain)] <- NA
+
+All_Rwanda_EndlineN$MakingSellingFood <- 0
+All_Rwanda_EndlineN$MakingSellingFood[All_Rwanda_EndlineN$occupationmain == "Restaurant /making and selling food"] <- 1
+All_Rwanda_EndlineN$MakingSellingFood[is.na(All_Rwanda_EndlineN$occupationmain)] <- NA
+        
+All_Rwanda_EndlineN$Shopkeeper <- 0
+All_Rwanda_EndlineN$Shopkeeper[All_Rwanda_EndlineN$occupationmain == "Shopkeeper"] <- 1
+All_Rwanda_EndlineN$Shopkeeper[is.na(All_Rwanda_EndlineN$occupationmain)] <- NA
+ 
+All_Rwanda_EndlineN$StreetVendor <- 0
+All_Rwanda_EndlineN$StreetVendor[All_Rwanda_EndlineN$occupationmain == "Street vendor"] <- 1
+All_Rwanda_EndlineN$StreetVendor[is.na(All_Rwanda_EndlineN$occupationmain)] <- NA
+ 
+
+## New Categories
+All_Rwanda_EndlineN$InformalWork <- 0
+All_Rwanda_EndlineN$InformalWork[All_Rwanda_EndlineN$occupationmain == "Street vendor" | All_Rwanda_EndlineN$occupationmain == "Shopkeeper" | All_Rwanda_EndlineN$occupationmain == "Market vendor" | All_Rwanda_EndlineN$occupationmain == "Making/ repairing clothes"] <- 1
+
+
+# Causal labour/ No occupation
+All_Rwanda_EndlineN$NoOccupation_Daylabourer <- 0
+All_Rwanda_EndlineN$NoOccupation_Daylabourer[All_Rwanda_EndlineN$occupationmain == "Day labourer" | All_Rwanda_EndlineN$occupationmain == "No occupation" ] <- 1
+
+#Farmer
+
+## HHsize
+
+##Insurance
+All_Rwanda_EndlineN$insurance2 <- recode(All_Rwanda_EndlineN$insurance, "Don't know" = -1, "No" = 0, "Yes, commercial/privately purchased health insurance" = 1, "Yes, MMI" = 1, "Yes, mutuelle or community based health insurance" = 1,"Yes, Rama/RSSB" = 1)
+All_Rwanda_EndlineN$insurance2[All_Rwanda_EndlineN$insurance2 == -1] <- NA
+
+
+
+
+#### Match with other dataset
+
+All_Rwanda_EndlineN$Rgroupnr <- recode(All_Rwanda_EndlineN$groupselRWA,"group 16" = "RWA006","group 14" = "RWA014", "group 13" = "RWA013", "group 9" = "RWA009", "group 12" = "RWA012", "group 11" = "RWA011", "group 15" = "RWA015", "group 10" = "RWA010")
+
+```
+
+
+## Financial Diaries
+```{r, include=FALSE}
+###### Income #####
+Total_income <- c("100WEEKS", "Received form other organizations like Church, etc." , "Received by Government (VUP, Ubudehe, …)",             "Cash given by Relatives/Friends/Family" ,"Social Gift" ,"Loan from friends or relatives" ,"Loan from Bank/SACCOs/Saving group etc" ,    "Return of loan from relatives/friends","Market/Street/Buying and Resellling","Restaurant/Sewing/Arts/Crafts/Renting Tools/Machine",       "Farming sales: Crop/Fruit" ,"Sale of assets" ,"Sale of livestock (Animal/Derivates)",  "Other sales", "Wages for work/Building/Transport/Day labour","Renting house/room" ,"Renting a plot of land" ,"Selling a plot of land","Selling a house",             "Other Income")
+
+index <- which(colnames(Financial.diary) %in% Total_income)
+for(i in 1: nrow(Financial.diary)){
+Financial.diary$Total_income[i] <- rowSums(Financial.diary[i,index], na.rm = T)
+}
+
+###### Income without loans and assistance #####
+Total_income_without <- c("Market/Street/Buying and Resellling","Restaurant/Sewing/Arts/Crafts/Renting Tools/Machine", "Farming sales: Crop/Fruit" ,"Sale of assets" ,"Sale of livestock (Animal/Derivates)",  "Other sales", "Wages for work/Building/Transport/Day labour","Renting house/room" ,"Renting a plot of land" ,"Selling a plot of land","Selling a house", "Other Income")
+
+index <- which(colnames(Financial.diary) %in% Total_income_without)
+for(i in 1: nrow(Financial.diary)){
+Financial.diary$Total_income_without[i] <- rowSums(Financial.diary[i,index], na.rm = T)
+}
+###### Inflation #####
+
+Financial.diary <- Financial.diary %>% dplyr::select("ID_NR_VU", "Weeknr","Total_income", "Total_income_without")
+Financial.diaryindex <- All_Rwanda[All_Rwanda$Rround == 0,] %>% dplyr::select("ID_NR_VU", "Cstartdate","StartMonth","Rgroupnr")
+Financial.diary <- right_join(Financial.diaryindex, Financial.diary, key = "ID_NR_VU")
+Financial.diary <- Financial.diary[!is.na(Financial.diary$Cstartdate),] #remove observations without monthly questionnaire
+
+indexDate <- c(Inflation$Date)
+indexID <- unique(c(Financial.diary$ID_NR_VU))
+
+for(i in 1:length(indexID)){
+index <- which(indexDate == Financial.diary$Cstartdate[Financial.diary$ID_NR_VU == indexID[i]][1])
+indexMonth <- round(Financial.diary$Weeknr[Financial.diary$ID_NR_VU == indexID[i]]/4.33) + index
+Financial.diary$Date[Financial.diary$ID_NR_VU == indexID[i]] <- indexDate[indexMonth]
+}
+
+Financial.diary <- merge(Financial.diary, Inflation, by = "Date") #Add Inlfation rate
+
+
+#Startdate.x -> actual startdate from baseline
+#Startdate.y & Date -> date from observation
+
+ValueCPI <- Financial.diary$CPI[Financial.diary$Cstartdate.x == 201709][1]
+ValueFood <- Financial.diary$FoodCPI[Financial.diary$Cstartdate.x == 201709][1]
+
+Financial.diary$Inflation <- (Financial.diary$CPI-ValueCPI)/ValueCPI
+
+##### Inflation
+Financial.diary$InflationTotal_income <- Financial.diary$Total_income*(1+Financial.diary$Inflation)
+Financial.diary$InflationTotal_income_without <- Financial.diary$Total_income_without*(1+Financial.diary$Inflation)
+
+Financial.diary <- Financial.diary %>% dplyr::select("ID_NR_VU", "Weeknr","Rgroupnr", "Total_income", "Total_income_without", "InflationTotal_income", "InflationTotal_income_without")
+
+```
+
+
+```{r, include=FALSE}
+##### Monthly Income ########
+ID_NR_VU <- numeric()
+month <- numeric()
+average_totalinc <- numeric()
+average_totalinc_without <- numeric()
+InflationAverage_totalinc <- numeric()
+InflationAverage_totalinc_without <- numeric()
+Rgroupnr <- character()
+Month_totalinc <- Financial.diary
+counter3 <- 0
+for(i in 1:length(unique(Month_totalinc$ID_NR_VU))) {
+  index <- unique(Month_totalinc$ID_NR_VU)[i]
+  data <- na.omit(Month_totalinc[Month_totalinc$ID_NR_VU == index,])
+  counter2 <- 0
+  counter4 <- -3
+while(round(counter4 + 4.33) < max(data$Weeknr)){
+counter4 <- counter4 + 4.33 #counts the current weeks
+counter2 <- counter2 + 1 #Month
+counter3 <- counter3 + 1 #Index dataframe
+Rgroupnr[counter3] <- as.character(data$Rgroupnr[1])
+ID_NR_VU[counter3] <- index
+month[counter3] <- counter2 
+average_totalinc[counter3] <- mean(data$Total_income[c(round(counter4):c(round(counter4)+3))])
+average_totalinc_without[counter3] <- mean(data$Total_income_without[c(round(counter4):c(round(counter4)+3))])
+InflationAverage_totalinc[counter3] <- mean(data$InflationTotal_income[c(round(counter4):c(round(counter4)+3))])
+InflationAverage_totalinc_without[counter3] <- mean(data$InflationTotal_income_without[c(round(counter4):c(round(counter4)+3))])
+}
+}
+
+
+Diary_average <- data.frame(cbind(Rgroupnr = Rgroupnr, ID_NR_VU = ID_NR_VU, Month = month, average_totalinc = average_totalinc,average_totalinc_without = average_totalinc_without, InflationAverage_totalinc = InflationAverage_totalinc, InflationAverage_totalinc_without = InflationAverage_totalinc_without ))
+Diary_average$Rgroupnr <- Rgroupnr
+Diary_average$ID_NR_VU <- ID_NR_VU
+
+#Rround 0 0
+Diary_average$Rround <- NA
+for(i in 1:nrow(Diary_average)){
+  if(Diary_average$Month[i] == 1){
+    Diary_average$Rround[i] <- 0
+    } else if(Diary_average$Month[i] == 2){
+    Diary_average$Rround[i] <- 1
+    } else if(Diary_average$Month[i] == 4){
+    Diary_average$Rround[i] <- 2
+    } else if(Diary_average$Month[i] == 7){
+    Diary_average$Rround[i] <- 3
+    }else if(Diary_average$Month[i] == 10){
+    Diary_average$Rround[i] <- 4
+    } else if(Diary_average$Month[i] == 14){
+    Diary_average$Rround[i] <- 5
+    } else if(Diary_average$Month[i] == 17){
+    Diary_average$Rround[i] <- 6
+    } else if(Diary_average$Month[i] == 20){
+    Diary_average$Rround[i] <- 7
+    } else if(Diary_average$Month[i] == 23){
+    Diary_average$Rround[i] <- 100
+    } else if(Diary_average$Month[i] == 29){
+    Diary_average$Rround[i] <- 9
+    }
+}
+
+Diary_average <- Diary_average[!is.na(Diary_average$Rround),]
+
+Financial.diary$Rround[Financial.diary$Weeknr == 1] <- 0
+Financial.diary$Rround[Financial.diary$Weeknr == 9] <- 1
+Financial.diary$Rround[Financial.diary$Weeknr == 18] <- 2
+Financial.diary$Rround[Financial.diary$Weeknr == 31] <- 3
+Financial.diary$Rround[Financial.diary$Weeknr == 44] <- 4
+Financial.diary$Rround[Financial.diary$Weeknr == 61] <- 5
+Financial.diary$Rround[Financial.diary$Weeknr == 74] <- 6
+Financial.diary$Rround[Financial.diary$Weeknr == 87] <- 7
+Financial.diary$Rround[Financial.diary$Weeknr == 100] <- 100
+
+
+
+Financial.diary <- Financial.diary[!is.na(Financial.diary$Rround),]
+```
+
+
+```{r, include=FALSE}
+All_Rwanda <- All_Rwanda %>%  dplyr::select("ID_NR_VU", "Cstartdate","StartMonth", "Rround", "Rgroupnr","age_1","HusbandPartnerSameHousehold","HusbandPartnerNotSameHousehold","PartnerDied", "NoPartner", "howmanyHHM_1","hermoney", "decisionfam", "hhpurchases", "psychwellbeing_1", "psychwellbeing_2", "psychwellbeing_3", "psychwellbeing_5","insurance2", "NoOccupation_Daylabourer", "Farmer", "InformalWork"
+,"schoolcompleted","livestocksum","prodsum","savinghowmuch_1", "savinghowmuch_2", "savinghowmuch_3","debtamount_1") 
+
+
+All_Rwanda_BaselineN$Rround <- 0
+All_Rwanda_BaselineN$howmanyhhm_1 <- All_Rwanda_BaselineN$howmanyHHM_1
+All_Rwanda_BaselineN <- All_Rwanda_BaselineN %>%  dplyr::select("ID_NR_VU", "Cstartdate","StartMonth", "Rround", "Rgroupnr","age_1","HusbandPartnerSameHousehold","HusbandPartnerNotSameHousehold","PartnerDied", "NoPartner", "howmanyhhm_1","stereotypes_1","stereotypes_2","stereotypes_3","stereotypes_4","socialsupport_1","socialsupport_2","socialsupport_3","socialsupport_4","decisionmaking_1","decisionmaking_2","decisionmaking_4","decisionmaking_3","hermoney","hismoney","hhpurchases","decisionfam","psychwellbeing_1","psychwellbeing_2","psychwellbeing_3","psychwellbeing_4","psychwellbeing_5","psychwellbeing_6","psychwellbeing2_1", "psychwellbeing2_2","psychwellbeing2_3","psychwellbeing2_4","psychwellbeing2_5","psychwellbeing2_6", "insurance2", "NoOccupation_Daylabourer", "Farmer", "InformalWork"
+,"schoolcompleted","livestocksum","prodsum","savinghowmuch_1", "savinghowmuch_2", "savinghowmuch_3","debtamount_1")
+
+All_Rwanda_BaselineN$IndexG <- 1
+
+
+All_Rwanda_EndlineN$Rround <- 100
+All_Rwanda_EndlineN$howmanyhhm_1 <- All_Rwanda_EndlineN$howmanyHHM_1
+All_Rwanda_EndlineN <- All_Rwanda_EndlineN %>%  dplyr::select("ID_NR_VU", "Cstartdate","StartMonth", "Rround", "Rgroupnr","age_1","HusbandPartnerSameHousehold","HusbandPartnerNotSameHousehold","PartnerDied", "NoPartner", "howmanyhhm_1","stereotypes_1","stereotypes_2","stereotypes_3","stereotypes_4","socialsupport_1","socialsupport_2","socialsupport_3","socialsupport_4","decisionmaking_1","decisionmaking_2","decisionmaking_4","decisionmaking_3","hermoney","hismoney","hhpurchases","decisionfam","psychwellbeing_1","psychwellbeing_2","psychwellbeing_3","psychwellbeing_4","psychwellbeing_5","psychwellbeing_6","psychwellbeing2_1", "psychwellbeing2_2","psychwellbeing2_3","psychwellbeing2_4","psychwellbeing2_5","psychwellbeing2_6", "insurance2", "NoOccupation_Daylabourer", "Farmer", "InformalWork"
+,"schoolcompleted","livestocksum","prodsum","savinghowmuch_1", "savinghowmuch_2", "savinghowmuch_3","debtamount_1")
+
+All_Rwanda_EndlineN$IndexG <- 1
+
+
+All_Rwanda_complete <- full_join(All_Rwanda_BaselineN, All_Rwanda_EndlineN)
+All_Rwanda_complete$age_1 <- as.numeric(All_Rwanda_complete$age_1)
+All_Rwanda_complete <- full_join(All_Rwanda_complete, All_Rwanda)
+ 
+All_Rwanda_complete <- merge(All_Rwanda_complete, Diary_average, all.x = T, key = c("ID_NR_VU", "Rround"))
+All_Rwanda_complete <- merge(All_Rwanda_complete,Financial.diary, all.x = T, key = c("ID_NR_VU", "Rround"))
+
+
+Roundindex <- c(0,1,2,3,4,5,6,7,100)
+duplicated <-   All_Rwanda_complete %>% .[.$Rround == Roundindex[1],]  %>%  .[which(duplicated(.$ID_NR_VU)),] 
+
+for(i in 2:length(Roundindex)){
+duplicated2 <-   All_Rwanda_complete %>% .[.$Rround == Roundindex[i],]  %>%  .[which(duplicated(.$ID_NR_VU)),]
+if(nrow(duplicated2) != 0){
+duplicated <- rbind(duplicated,duplicated2)
+}
+}
+duplicated <- unique(duplicated$ID_NR_VU)
+duplicated <- duplicated[-15]
+
+All_Rwanda_complete <- All_Rwanda_complete[-which(All_Rwanda_complete$ID_NR_VU %in% duplicated),]
+
+write.csv(All_Rwanda_complete, "All_Rwanda_complete_11.07.csv")
+openxlsx::write.xlsx(All_Rwanda_complete, "All_Rwanda_complete_11.07.xlsx") 
+```
+
+
+
+
+
+##### Descriptives #######
+```{r setup, include=FALSE}
+index <- c("ID_NR_VU","age_1","Rround" , "howmanyHHM_1","insurance2", "NoOccupation_Daylabourer", "Farmer", "InformalWork"
+,"schoolcompleted","livestocksum","prodsum","savinghowmuch_1", "savinghowmuch_2", "savinghowmuch_3","debtamount_1", "InflationAverage_totalinc_without")
+
+
+All_Rwanda_B_short <- All_Rwanda_complete[All_Rwanda_complete$Rround == 0,] %>% dplyr::select(index)
+
+BaselineCharacteristics <- All_Rwanda_B_short  %>%  psych::describe(., fast = T)  %>% as.data.frame()  %>% round(.,2)
+
+table <- flextable(BaselineCharacteristics)
+
+```
+
+

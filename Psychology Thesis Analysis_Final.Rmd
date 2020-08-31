@@ -1,0 +1,884 @@
+---
+title: "Panel Network"
+author: "Anna Langener"
+date: "7/9/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r setup}
+library("qgraph")
+library("dplyr")
+library("psych")
+library("graphicalVAR")
+library("psychonetrics")
+library("lavaan")
+library('ltm')
+library("semPlot")
+library('tidyr')
+library('ggplot2')
+library("ggcorrplot")
+library("readxl")
+library("IsingFit")
+library("bootnet")
+library("flextable")
+library("psych")
+library("kableExtra")
+library("tidyverse")
+library("tidyselect")
+library("xtable")
+library("qwraps2")
+library("lme4")
+library("lmerTest")
+library("readxl")
+library("ggpubr")
+
+### Load combined dataset
+All_Rwanda_complete <- as.data.frame(read.csv("/Users/annalangener/surfdrive/Data Thesis/Data Final Thesis/All_Rwanda_complete_11.07.csv", header = TRUE, na.strings = c(""," ","NA")))
+```
+
+
+## Function to count variables
+I just used this function to count how many participants and groups we have for each variable and wave of measurement. 
+
+```{r setup, include=FALSE}
+# Function to count observations per variable per time point
+
+counting_obs2 <- function(round, variable) {
+  counter <- 0
+  dataset <- All_Rwanda[All_Rwanda$Rround == round,]
+  if(nrow(dataset)!= 0) {
+  index <- which(colnames(dataset) == variable)
+  print(index)
+  for(i in 1:nrow(dataset)){
+    if(is.na(dataset[i, as.numeric(index)]) == F)
+      {
+      counter <- counter + 1
+    }
+  }
+  result <- counter
+  }else{
+  result <- 0
+  }
+  return(result)
+}
+
+
+counting_function <- function(variable) {
+round_list <- c(0,1,2,3,4,5,6,7,8)
+result <- as.data.frame(matrix(0, nrow = length(variable_list), ncol = 11))
+colnames(result) <- c("variable", "O","1","2", "3", "4", "5", "6", "7", "8")
+for(i in 1:length(variable_list)){
+      for(j in 1:length(round_list)){
+        result$variable[i] <- variable_list[i]
+        result[i,j + 1] <- counting_obs2(round = round_list[j], variable = variable_list[i])
+  }
+}
+  return(result)
+}
+
+## choose variable
+All_Rwanda <- All_Rwanda_complete[!is.na(All_Rwanda_complete$Rgroupnr),]
+
+variable_list <- colnames(All_Rwanda)
+counting <- counting_function(variable = variable_list)
+
+openxlsx::write.xlsx(counting, "Overview2.xlsx")
+
+### Adapted function to cound the groups per variable per time point
+
+counting_obs2 <- function(round, variable) {
+  counter <- 0
+  dataset <- All_Rwanda_complete[All_Rwanda_complete$Rround == round,]
+  if(nrow(dataset)!= 0) {
+  index <- which(colnames(dataset) == variable)
+  print(index)
+  dataset <- na.omit(dataset[,c(as.numeric(index),4)])
+  counter <- length(unique(dataset$Rgroupnr))
+  print(counter)
+  result <- counter
+  }else{
+  result <- 0
+  }
+  return(result)
+}
+
+counting_function <- function(variable) {
+round_list <- c(0,1,2,3,4,5,6,7,8)
+result <- as.data.frame(matrix(0, nrow = length(variable_list), ncol = 11))
+colnames(result) <- c("variable", "O","1","2", "3", "4", "5", "6", "7", "8")
+for(i in 1:length(variable_list)){
+      for(j in 1:length(round_list)){
+        result$variable[i] <- variable_list[i]
+        result[i,j + 1] <- counting_obs2(round = round_list[j], variable = variable_list[i])
+  }
+}
+  return(result)
+}
+
+## choose variable
+All_Rwanda <- All_Rwanda_complete[!is.na(All_Rwanda_complete$Rgroupnr),]
+
+variable_list <- colnames(All_Rwanda)
+counting <- counting_function(variable = variable_list)
+
+```
+
+## Create Scale Scores
+Here I just create scale scoles, for the plot, descriptive analysis, and robustness check.
+```{r}
+### Create sum scores (for the plot and the descriptives)
+#Psychwellbeing
+index <- which(colnames(All_Rwanda_complete) %in% c("psychwellbeing_1","psychwellbeing_2","psychwellbeing_3","psychwellbeing_4","psychwellbeing_5","psychwellbeing_6","psychwellbeing2_1", "psychwellbeing2_2","psychwellbeing2_3","psychwellbeing2_4","psychwellbeing2_5","psychwellbeing2_6"))
+
+All_Rwanda_complete$PsychologicalWellbeingScaleFull <- rowSums(All_Rwanda_complete[,index])
+
+index <- c("psychwellbeing_1","psychwellbeing_2","psychwellbeing_3","psychwellbeing_5")
+
+All_Rwanda_complete$PsychologicalWellbeingScale <- rowSums(All_Rwanda_complete[,index])
+
+
+#Social Support
+index <- which(colnames(All_Rwanda_complete) %in% c("socialsupport_1","socialsupport_2","socialsupport_3","socialsupport_4"))
+All_Rwanda_complete$SocialSupportScaleFull <- rowSums(All_Rwanda_complete[,index])
+
+
+#Empowerment
+index <- which(colnames(All_Rwanda_complete) %in% c("decisionmaking_1","decisionmaking_2","decisionmaking_4","decisionmaking_3","hermoney","hismoney","hhpurchases","decisionfam"))
+All_Rwanda_complete$EmpowermentScaleFull <- rowSums(All_Rwanda_complete[,index])
+
+index <- which(colnames(All_Rwanda_complete) %in% c("hermoney","hhpurchases"))
+All_Rwanda_complete$EmpowermentScale <- rowSums(All_Rwanda_complete[,index])
+
+
+#Stereotypes
+index <- which(colnames(All_Rwanda_complete) %in% c("stereotypes_1","stereotypes_2","stereotypes_3","stereotypes_4"))
+All_Rwanda_complete$StereotypesScaleFull <- rowSums(All_Rwanda_complete[,index])
+```
+
+Test wheather old groups have higher wellbeing (impact corona)
+
+```{r setup, include=FALSE}
+All_Rwanda_complete$IndexG[is.na(All_Rwanda_complete$IndexG)] <- 0
+NewGroups <- All_Rwanda_complete[All_Rwanda_complete$IndexG == 1,]
+OldGroups <- All_Rwanda_complete[All_Rwanda_complete$IndexG == 0,]
+
+t.test(NewGroups$PsychologicalWellbeingScale,OldGroups$PsychologicalWellbeingScale)
+
+```
+
+
+## Correlation Plot
+```{r}
+All_Rwanda_complete$average_totalinc_without
+### Correlation
+library(apaTables)
+
+All_Rwanda_complete$Rround[All_Rwanda_complete$Rround == 100] <- 8
+
+
+All_Rwanda_complete[All_Rwanda_complete$IndexG == 1,] %>% dplyr::select("PsychologicalWellbeingScaleFull","EmpowermentScaleFull", "SocialSupportScaleFull","StereotypesScaleFull","average_totalinc_without","InflationAverage_totalinc_without", "Rround") %>%  apa.cor.table(., filename="Table1_APA.doc", table.number= NA, show.conf.interval = F, landscape = FALSE)
+
+
+All_Rwanda_complete %>% dplyr::select( "PsychologicalWellbeingScale", "EmpowermentScale","average_totalinc_without","InflationAverage_totalinc_without", "Rround") %>%  apa.cor.table(., filename="Table1_APA.doc", table.number=NA,  show.conf.interval = FALSE, landscape = FALSE)
+
+```
+
+
+## Plot of average Scale Score over time
+```{r}
+# Plot average change in variables
+index1 <- c(0,1,2,3,4,5,6,7,8)
+Rround <- numeric()
+AveragePsychologicalWellbeingScaleFull <- numeric()
+AverageEmpowermentScaleFull  <- numeric()
+AveragePsychologicalWellbeingScale <- numeric()
+AverageEmpowermentScale  <- numeric()
+AverageSocialSupportScaleFull <- numeric()
+AverageStereotypesScaleFull  <- numeric()
+InflationAverage_totalinc_without1 <- numeric()
+InflationAverage_totalinc_without2 <- numeric()
+
+counter <- 0
+ID_NR_VU <- numeric()
+
+for(k in 1:length(index1)){
+counter <- counter + 1
+Plot <- All_Rwanda_complete[All_Rwanda_complete$IndexG == 1,]
+Plot <- All_Rwanda_complete[All_Rwanda_complete$Rround == index1[k],]
+
+
+AveragePsychologicalWellbeingScale[counter] <- mean(Plot$PsychologicalWellbeingScale, na.rm =  T)
+
+AverageEmpowermentScale[counter]  <- mean(Plot$EmpowermentScale,  na.rm =  T)
+
+InflationAverage_totalinc_without1[counter]  <- mean(Plot$InflationAverage_totalinc_without,  na.rm =  T)
+}
+
+counter <- 0
+
+
+for(k in 1:length(index1)){
+counter <- counter + 1
+Plot <- All_Rwanda_complete[All_Rwanda_complete$Rround == index1[k],]
+
+
+AveragePsychologicalWellbeingScaleFull[counter] <- mean(Plot$PsychologicalWellbeingScaleFull, na.rm =  T)
+
+AverageEmpowermentScaleFull[counter]  <- mean(Plot$EmpowermentScaleFull,  na.rm =  T)
+
+AverageSocialSupportScaleFull[counter] <- mean(Plot$SocialSupportScaleFull,  na.rm =  T)
+
+AverageStereotypesScaleFull[counter]  <- mean(Plot$StereotypesScaleFull,  na.rm =  T)
+}
+
+
+Group_average <- as.data.frame(cbind(index1,AveragePsychologicalWellbeingScaleFull, AveragePsychologicalWellbeingScale,  AverageEmpowermentScaleFull, AverageEmpowermentScale, AverageSocialSupportScaleFull, AverageStereotypesScaleFull, InflationAverage_totalinc_without1, InflationAverage_totalinc_without2))
+
+figure1 <- ggplot(Group_average, x = index1) +
+  geom_bar(stat="identity", aes(index1,AveragePsychologicalWellbeingScaleFull)) +
+  ylab("Psychological Wellbeing") +
+  xlab("Round")
+   
+figure2 <- ggplot(Group_average, x = index1) +
+   geom_bar(stat="identity",aes(index1,AverageEmpowermentScaleFull))  +
+  ylab("Empowerment") +
+  xlab("Round")
+  
+figure3 <- ggplot(Group_average, x = index1) +
+   geom_bar(stat="identity",aes(index1,AveragePsychologicalWellbeingScale,)) +
+  ylab("Psychological Wellbeing Short") +
+  xlab("Round")
+
+figure4 <- ggplot(Group_average, x = index1) +
+   geom_bar(stat="identity",aes(index1,AverageEmpowermentScale)) +
+  ylab("Empowerment Short") +
+  xlab("Round")
+  
+figure5 <- ggplot(Group_average, x = index1) +
+   geom_bar(stat="identity",aes(index1,AverageSocialSupportScaleFull)) +
+  ylab("Social Support") +
+  xlab("Round")
+  
+figure6 <- ggplot(Group_average, x = index1) +
+   geom_bar(stat="identity",aes(index1,AverageStereotypesScaleFull))  +
+  ylab("Stereotypes") +
+  xlab("Round")
+
+figure7 <- ggplot(Group_average, x = index1) +
+   geom_bar(stat="identity",aes(index1,InflationAverage_totalinc_without1))  +
+  ylab("Income") +
+  xlab("Round")
+
+figure8 <- ggplot(Group_average, x = index1) +
+   geom_bar(stat="identity",aes(index1,InflationAverage_totalinc_without2))  +
+  ylab("Income") +
+  xlab("Round")
+
+### Full Sample
+
+figure9 <- ggarrange(figure3, figure4, figure7, common.legend = TRUE,legend = "bottom",  ncol = 2, nrow =4)
+
+png('Descriptive Main Variables1.png',height = 20, width = 20, units = 'cm', res = 600)
+plot(figure9)
+dev.off()
+
+
+### Sub Sample
+
+
+figure10 <- ggarrange(figure1, figure2, figure5, figure6, common.legend = TRUE,legend = "bottom",  ncol = 2, nrow =4)
+
+png('Descriptive Main Variables2.png',height = 20, width = 20, units = 'cm', res = 600)
+plot(figure10)
+dev.off()
+
+```
+
+## Cronbach's Alpha
+
+```{r}
+#### Cronbachs Alpha
+
+#Wellbeing Long
+All_Rwanda_complete %>% dplyr::select("psychwellbeing_1","psychwellbeing_2","psychwellbeing_3","psychwellbeing_4","psychwellbeing_5","psychwellbeing_6","psychwellbeing2_1", "psychwellbeing2_2","psychwellbeing2_3","psychwellbeing2_4","psychwellbeing2_5","psychwellbeing2_6") %>% na.omit() %>% cronbach.alpha()
+
+All_Rwanda_complete[All_Rwanda_complete$IndexG == 1,] %>%  dplyr::select("psychwellbeing_1","psychwellbeing_2","psychwellbeing_3","psychwellbeing_4","psychwellbeing_5","psychwellbeing_6","psychwellbeing2_1", "psychwellbeing2_2","psychwellbeing2_3","psychwellbeing2_4","psychwellbeing2_5","psychwellbeing2_6") %>% apa.cor.table(., filename="Table1_APA.doc", table.number=NA,  show.conf.interval = FALSE, landscape = T)
+
+
+
+#Wellbeing Short
+All_Rwanda_complete %>% dplyr::select("psychwellbeing_1","psychwellbeing_2","psychwellbeing_3","psychwellbeing_5") %>% na.omit() %>% cronbach.alpha()
+
+#Empowerment Long
+All_Rwanda_complete %>% dplyr::select("decisionmaking_1","decisionmaking_2","decisionmaking_4","decisionmaking_3","hermoney","hismoney","hhpurchases","decisionfam") %>% na.omit() %>% cronbach.alpha()
+
+#Empowerment short
+All_Rwanda_complete %>% dplyr::select("hermoney","hhpurchases") %>% na.omit() %>% cronbach.alpha()
+
+#Stereotypes short
+All_Rwanda_complete %>% dplyr::select("stereotypes_1","stereotypes_2","stereotypes_3","stereotypes_4") %>% na.omit() %>% cronbach.alpha()
+
+All_Rwanda_complete %>% dplyr::select("socialsupport_1","socialsupport_2","socialsupport_3","socialsupport_4") %>% na.omit() %>% cronbach.alpha()
+
+```
+
+
+### Structural Equation Modeling
+Model 1 (Full Sample)
+```{r}
+# Select Variables 
+All_Rwanda_network <- All_Rwanda_complete %>%  dplyr::select("ID_NR_VU","Rround","hermoney","hhpurchases","psychwellbeing_1","psychwellbeing_2","psychwellbeing_3","psychwellbeing_5", "InflationAverage_totalinc_without", "age_1")
+
+All_Rwanda_network$Rround[All_Rwanda_network$Rround == 100] <- 8
+
+
+All_Rwanda_network[,-1] <- scale(All_Rwanda_network[-1], center = F) #Otherwise model did not converge
+
+Model_SEM <- '
+   # Latent variables
+   Empowerment =~ hermoney + hhpurchases
+   Mental_wellbeing =~ psychwellbeing_1 + psychwellbeing_2 + psychwellbeing_3 + psychwellbeing_5
+   
+   # Regressions
+    InflationAverage_totalinc_without ~ Rround
+    Empowerment ~ InflationAverage_totalinc_without + Rround
+    Mental_wellbeing ~ InflationAverage_totalinc_without + Empowerment + Rround
+'
+
+# Fit in lavaan:
+fit2 <- lavaan::sem(Model_SEM, data = All_Rwanda_network, ordered=c("hermoney", "hhpurchases" ,"psychwellbeing_1","psychwellbeing_2","psychwellbeing_3","psychwellbeing_5"))
+
+parameterEstimates(fit2)
+
+fitMeasures(fit2, c("rmsea","cfi","tli","nfi","rfi","ifi","srmr","gfi", "chisq",
+"pvalue"))
+
+summary(fit2)
+
+
+
+semPaths(fit2,
+style = "lisrel", # This will plot residuals as arrows, closer to what we use in c
+what = "est",
+#residScale = 8, # This makes the residuals larger
+reorder = T, # This disables the default reordering
+legend.cex = 2, # Makes the legend smaller
+layout = "tree2", # tree layout options are "tree", "tree2", and "tree3"
+curvePivot = TRUE, # Changes curve into rounded straight lines
+sizeMan = 7, # Size of manifest variables
+sizeLat = 15, # Size of latent variables
+#mar = c(20,5,20,5), # Figure margins
+#color = list(lat = c('darkolivegreen2', 'lightblue2','lightsalmon2')),
+#nCharNodes = 0,
+edge.label.cex = 1,
+intercepts = FALSE
+)
+```
+
+Model 1 (Fullsample, unadjusted income)
+```{r}
+# Select Variables 
+All_Rwanda_network <- All_Rwanda_complete %>%  dplyr::select("ID_NR_VU","Rround","hermoney","hhpurchases","psychwellbeing_1","psychwellbeing_2","psychwellbeing_3","psychwellbeing_5", "average_totalinc_without", "age_1", "Cstartdate")
+
+All_Rwanda_network$Rround[All_Rwanda_network$Rround == 100] <- 8
+
+
+All_Rwanda_network[,-1] <- scale(All_Rwanda_network[-1], center = F) #Otherwise model did not converge
+
+Model_SEM <- '
+   # Latent variables
+   Empowerment =~ hermoney + hhpurchases
+   Mental_wellbeing =~ psychwellbeing_1 + psychwellbeing_2 + psychwellbeing_3 + psychwellbeing_5
+   
+   # Regressions
+    average_totalinc_without ~ Rround
+    Empowerment ~ average_totalinc_without + Rround
+    Mental_wellbeing ~ average_totalinc_without + Empowerment + Rround
+'
+
+# Fit in lavaan:
+fit2 <- lavaan::sem(Model_SEM, data = All_Rwanda_network, ordered=c("hermoney", "hhpurchases" ,"psychwellbeing_1","psychwellbeing_2","psychwellbeing_3","psychwellbeing_5"))
+
+parameterEstimates(fit2)
+
+fitMeasures(fit2, c("rmsea","cfi","tli","nfi","rfi","ifi","srmr","gfi", "chisq",
+"pvalue"))
+
+summary(fit2)
+
+
+
+semPaths(fit2,
+style = "lisrel", # This will plot residuals as arrows, closer to what we use in c
+what = "est",
+#residScale = 8, # This makes the residuals larger
+reorder = T, # This disables the default reordering
+legend.cex = 2, # Makes the legend smaller
+layout = "tree2", # tree layout options are "tree", "tree2", and "tree3"
+curvePivot = TRUE, # Changes curve into rounded straight lines
+sizeMan = 7, # Size of manifest variables
+sizeLat = 15, # Size of latent variables
+#mar = c(20,5,20,5), # Figure margins
+#color = list(lat = c('darkolivegreen2', 'lightblue2','lightsalmon2')),
+#nCharNodes = 0,
+edge.label.cex = 1,
+intercepts = FALSE
+)
+```
+
+
+Model 2 (Subsample)
+```{r}
+# Select Variables 
+
+All_Rwanda_network <- All_Rwanda_complete[All_Rwanda_complete$IndexG == 1,] %>%  dplyr::select("ID_NR_VU","Rround","socialsupport_1","socialsupport_2","socialsupport_3","socialsupport_4","decisionmaking_1","decisionmaking_2","decisionmaking_4","decisionmaking_3","hermoney","hismoney","hhpurchases","decisionfam","psychwellbeing_1","psychwellbeing_2","psychwellbeing_3","psychwellbeing_4","psychwellbeing_5","psychwellbeing_6","psychwellbeing2_1", "psychwellbeing2_2","psychwellbeing2_3","psychwellbeing2_4","psychwellbeing2_5","psychwellbeing2_6")
+
+All_Rwanda_network <- na.omit(All_Rwanda_network)
+A
+All_Rwanda_network$Rround[All_Rwanda_network$Rround == 8] <- 1
+
+All_Rwanda_network[,2:26] <-  scale(All_Rwanda_network[,2:26], center = F)
+
+
+#Model without social support_2 hermoney because correlation almost 1
+
+
+Model_SEM <- '
+ # Latent variables
+   Empowerment =~ decisionmaking_1 + decisionmaking_2 + decisionmaking_4 + decisionmaking_3 + hhpurchases + hismoney 
+   
+   Mental_wellbeing =~ psychwellbeing_1 + psychwellbeing_3 + psychwellbeing_4 + psychwellbeing_5 + psychwellbeing_6 + psychwellbeing2_1 + psychwellbeing2_2 + psychwellbeing2_3 + psychwellbeing2_4 + psychwellbeing2_5 + psychwellbeing2_6
+   
+ SocialSupport =~ socialsupport_1  + socialsupport_3 + socialsupport_4
+
+
+# Regressions
+    SocialSupport ~ Rround
+    Empowerment ~ SocialSupport + Rround 
+    Mental_wellbeing ~ SocialSupport + Empowerment + Rround
+'
+
+# Fit in lavaan:
+fit3 <- lavaan::sem(Model_SEM, data = All_Rwanda_network, ordered = c("socialsupport_1" , "socialsupport_3" , "socialsupport_4", "decisionmaking_1","decisionmaking_2","decisionmaking_4","decisionmaking_3","hismoney","hhpurchases","decisionfam", "psychwellbeing_1", "psychwellbeing_2", "psychwellbeing_3","psychwellbeing_4","psychwellbeing_5","psychwellbeing_6","psychwellbeing2_1", "psychwellbeing2_2","psychwellbeing2_3","psychwellbeing2_4","psychwellbeing2_5","psychwellbeing2_6"))
+semPaths(fit3)
+
+
+parameterEstimates(fit3)
+
+fitMeasures(fit3, c("rmsea","cfi","tli","nfi","rfi","ifi","srmr","gfi", "chisq",
+"pvalue"))
+
+summary(fit3, standardized = TRUE)
+
+graph_sem(fit3,
+          rect_width = 1.2,
+  rect_height = 0.8,
+  ellipses_width = 2,
+  ellipses_height = 2,
+  variance_diameter = 0.8,
+  spacing_x = 2,
+  spacing_y = 2,
+  text_size = 4,
+  curvature = 60)
+
+
+semPaths(fit3,
+style = "lisrel", # This will plot residuals as arrows, closer to what we use in c
+what = "est",
+#residScale = 8, # This makes the residuals larger
+#reorder = FALSE, # This disables the default reordering
+#legend.cex = 2, # Makes the legend smaller
+layout = "tree2", # tree layout options are "tree", "tree2", and "tree3"
+#cardinal = "lat cov", # This makes the latent covariances connet at a cardinal cen
+#curvePivot = TRUE, # Changes curve into rounded straight lines
+#sizeMan = 7, # Size of manifest variables
+#sizeLat = 15, # Size of latent variables
+#mar = c(20,5,20,5), # Figure margins
+#color = list(lat = c('darkolivegreen2', 'lightblue2','lightsalmon2')), nCharEdges = 0,
+#nCharNodes = 0,
+#edge.label.cex = 1,
+#label.cex = c(1,1,1, 1,1,1, 1,1,1, 1,1.1,.6),
+intercepts = FALSE
+)
+
+
+
+```
+
+
+Model 3 (Subsample, Stereotypes included)
+```{r}
+# Select Variables 
+All_Rwanda_network <- All_Rwanda_complete %>%  dplyr::select("ID_NR_VU","Rround","socialsupport_1","socialsupport_2","socialsupport_3","socialsupport_4","decisionmaking_1","decisionmaking_2","decisionmaking_4","decisionmaking_3","hermoney","hismoney","hhpurchases","decisionfam","psychwellbeing_1","psychwellbeing_2","psychwellbeing_3","psychwellbeing_4","psychwellbeing_5","psychwellbeing_6","psychwellbeing2_1", "psychwellbeing2_2","psychwellbeing2_3","psychwellbeing2_4","psychwellbeing2_5","psychwellbeing2_6", "stereotypes_1","stereotypes_2","stereotypes_3","stereotypes_4")
+
+All_Rwanda_network <- na.omit(All_Rwanda_network)
+A
+
+All_Rwanda_network$Rround[All_Rwanda_network$Rround == 8] <- 1 #Baseline is 0, Endline is 1
+
+All_Rwanda_network[,2:30] <-  scale(All_Rwanda_network[,2:30], center = F)
+
+
+#Model without social support_2 hermoney because correlation almost 1
+
+Model_SEM <- '
+ # Latent variables
+   Empowerment =~ decisionmaking_1 + decisionmaking_2 + decisionmaking_4 + decisionmaking_3 + hhpurchases + hismoney 
+   
+   Mental_wellbeing =~ psychwellbeing_1 + psychwellbeing_3 + psychwellbeing_4 + psychwellbeing_5 + psychwellbeing_6 + psychwellbeing2_1 + psychwellbeing2_2 + psychwellbeing2_3 + psychwellbeing2_4 + psychwellbeing2_5 + psychwellbeing2_6
+   
+ SocialSupport =~ socialsupport_1 + socialsupport_2 + socialsupport_3 + socialsupport_4
+ 
+ Stereotypes =~ stereotypes_1 + stereotypes_3 + stereotypes_4
+
+# Regressions
+    SocialSupport ~ Rround
+    Empowerment ~ SocialSupport + Rround + Stereotypes
+    Mental_wellbeing ~ SocialSupport + Empowerment + Rround + Stereotypes
+    Stereotypes ~  Rround + SocialSupport
+'
+
+
+
+# Fit in lavaan:
+fit3 <- lavaan::sem(Model_SEM, data = All_Rwanda_network, ordered = c("socialsupport_1" , "socialsupport_3" , "socialsupport_4", "decisionmaking_1","decisionmaking_2","decisionmaking_4","decisionmaking_3","hismoney","hhpurchases","decisionfam", "psychwellbeing_1", "psychwellbeing_2", "psychwellbeing_3","psychwellbeing_4","psychwellbeing_5","psychwellbeing_6","psychwellbeing2_1", "psychwellbeing2_2","psychwellbeing2_3","psychwellbeing2_4","psychwellbeing2_5","psychwellbeing2_6", "stereotypes_1","stereotypes_2","stereotypes_3","stereotypes_4"))
+semPaths(fit3)
+
+
+parameterEstimates(fit3)
+
+fitMeasures(fit3, c("rmsea","cfi","tli","nfi","rfi","ifi","srmr","gfi", "chisq",
+"pvalue"))
+
+summary(fit3, standardized = TRUE)
+
+
+semPaths(fit3,
+style = "lisrel", # This will plot residuals as arrows, closer to what we use in c
+what = "est",
+#residScale = 8, # This makes the residuals larger
+#reorder = FALSE, # This disables the default reordering
+#legend.cex = 2, # Makes the legend smaller
+layout = "tree2", # tree layout options are "tree", "tree2", and "tree3"
+#cardinal = "lat cov", # This makes the latent covariances connet at a cardinal cen
+#curvePivot = TRUE, # Changes curve into rounded straight lines
+#sizeMan = 7, # Size of manifest variables
+#sizeLat = 15, # Size of latent variables
+#mar = c(20,5,20,5), # Figure margins
+#color = list(lat = c('darkolivegreen2', 'lightblue2','lightsalmon2')), nCharEdges = 0,
+#nCharNodes = 0,
+#edge.label.cex = 1,
+#label.cex = c(1,1,1, 1,1,1, 1,1,1, 1,1.1,.6),
+intercepts = FALSE
+)
+
+
+
+```
+
+
+
+## Panel Data Network
+
+All time points negative autocorrelation
+Only full waves negative correlation
+Remove waves with low sample size: # Round 6 smallest sample, round 7, round 2
+Without Round 6 no between subject network
+Without round 2 and 6 negative autocorrelation
+Without round 7 and 6 (no negative autocorrelation, best model so far)
+Without round 2, 7 and 6 negative autocorrelation
+
+# Income ajusted for Inflation
+```{r setup, include=FALSE}
+All_Rwanda_network <- All_Rwanda_complete %>%  dplyr::select("ID_NR_VU","Rround","InflationAverage_totalinc_without","hermoney","hhpurchases", "psychwellbeing_1","psychwellbeing_2","psychwellbeing_3","psychwellbeing_5")
+All_Rwanda_network <- All_Rwanda_network[!All_Rwanda_network$ID_NR_VU == 9999,]
+All_Rwanda_network <- All_Rwanda_network[!is.na(All_Rwanda_network$ID_NR_VU),]
+
+
+#Get data into wide format
+Empowerment_wide <- reshape(All_Rwanda_network, direction = "wide", timevar = "Rround", idvar = "ID_NR_VU")
+
+Empowerment_wide[,-1] <- scale(Empowerment_wide[,-1], center = F)
+
+colnames(Empowerment_wide)
+paste(colnames(Empowerment_wide[-1]), collapse = c("','"))
+
+
+#Build Design Matrix:
+#Each column contains wave of measurement and each row contains variable name. The matrix is then filled with the actual variable names (See summary statitic example)
+
+##Without round 7 and 6 (no negative autocorrelation, best model so far)
+
+varMat1 <- matrix(c('InflationAverage_totalinc_without.0','hermoney.0','hhpurchases.0','psychwellbeing_1.0','psychwellbeing_2.0','psychwellbeing_3.0','psychwellbeing_5.0',
+                    'InflationAverage_totalinc_without.1',NA,NA,'psychwellbeing_1.1','psychwellbeing_2.1','psychwellbeing_3.1','psychwellbeing_5.1',
+                    'InflationAverage_totalinc_without.2','hermoney.2','hhpurchases.2',NA,NA,NA,NA,
+                    'InflationAverage_totalinc_without.3','hermoney.3','hhpurchases.3',NA,NA,NA,NA,
+                    'InflationAverage_totalinc_without.4','hermoney.4','hhpurchases.4','psychwellbeing_1.4','psychwellbeing_2.4','psychwellbeing_3.4','psychwellbeing_5.4',
+                    'InflationAverage_totalinc_without.5','hermoney.5','hhpurchases.5','psychwellbeing_1.5','psychwellbeing_2.5','psychwellbeing_3.5','psychwellbeing_5.5',
+                    'InflationAverage_totalinc_without.8','hermoney.8','hhpurchases.8','psychwellbeing_1.8','psychwellbeing_2.8','psychwellbeing_3.8','psychwellbeing_5.8'),7,7, byrow = F) 
+
+
+rownames(varMat1) <- c("Income", "hermoney", "hhpurchases","psychwellbeing_1", "psychwellbeing_2", "psychwellbeing_3", "psychwellbeing_5")
+
+#Model 1
+model <- panelgvar(data = Empowerment_wide,
+  vars = varMat1, estimator = "FIML", missing = "pairwise")
+
+# Run model:
+model <- model %>% runmodel
+
+# Check fit:
+model %>% fit 
+
+# Estimation algorithm (prune step):
+model_prune <- model %>% prune(alpha = 0.05, recursive = FALSE)
+
+##Stepup
+model_pruneSP <- model_prune %>%  stepup(alpha = 0.05, criterion = "bic")
+
+model_pruneSP %>% fit
+
+
+# Compare:
+comp <- compare(
+  original = model,
+  pruned = model_pruneSP
+  )
+
+# Differences:
+comp$AIC[1] 
+comp$AIC[2]
+
+comp$BIC[1]
+comp$BIC[2]
+
+temporal <- getmatrix(model_pruneSP, "PDC")
+contemporaneous <- getmatrix(model_pruneSP, "omega_zeta_within")
+between <- getmatrix(model_pruneSP, "omega_zeta_between")
+
+
+
+# Average layout:
+Layout <- averageLayout(temporal,contemporaneous,between)
+
+
+# Plot all graphs:
+max <- max(c(abs(temporal),abs(contemporaneous),abs(between)))
+
+
+fig1 <- qgraph(temporal, labels = c("Income", "hermoney", "hhpurchases","WB_1", "WB_2", "WB_3", "WB_5"), title = "Temporal", label.cex = 1, layout = Layout)
+fig2 <- qgraph(contemporaneous, labels = c("Income", "hermoney", "hhpurchases","WB_1", "WB_2", "WB_3", "WB_5"), title = "Contemporaneous",label.cex = 1, layout = Layout)
+fig3 <-qgraph(between,labels = c("Income", "hermoney", "hhpurchases","WB_1", "WB_2", "WB_3", "WB_5"), title = "Between Subjects",label.cex = 1, layout = Layout)
+
+
+png('temporal.png',height = 10, width = 7, units = 'cm', res = 600)
+plot(fig1)
+dev.off()
+
+
+png('contemporaneous.png',height = 10, width = 7, units = 'cm', res = 600)
+plot(fig2)
+dev.off()
+
+
+png('between.png',height = 10, width = 7, units = 'cm', res = 600)
+plot(fig3)
+dev.off()
+
+```
+
+
+# Income not adjusted for Inflations
+```{r setup, include=FALSE}
+set.seed(12361488)
+All_Rwanda_network <- All_Rwanda_complete %>%  dplyr::select("ID_NR_VU","Rround","average_totalinc_without","hermoney","hhpurchases", "psychwellbeing_1","psychwellbeing_2","psychwellbeing_3","psychwellbeing_5")
+All_Rwanda_network <- All_Rwanda_network[!All_Rwanda_network$ID_NR_VU == 9999,]
+All_Rwanda_network <- All_Rwanda_network[!is.na(All_Rwanda_network$ID_NR_VU),]
+
+
+
+#Get data into wide format
+Empowerment_wide <- reshape(All_Rwanda_network, direction = "wide", timevar = "Rround", idvar = "ID_NR_VU")
+
+Empowerment_wide[,-1] <- scale(Empowerment_wide[,-1], center = F)
+
+colnames(Empowerment_wide)
+paste(colnames(Empowerment_wide[-1]), collapse = c("','"))
+
+
+#Build Design Matrix:
+#Each column contains wave of measurement and each row contains variable name. The matrix is then filled with the actual variable names (See summary statitic example)
+
+##Without round 7 and 6 (no negative autocorrelation, best model so far)
+
+varMat1 <- matrix(c('average_totalinc_without.0','hermoney.0','hhpurchases.0','psychwellbeing_1.0','psychwellbeing_2.0','psychwellbeing_3.0','psychwellbeing_5.0',
+                    'average_totalinc_without.1',NA,NA,'psychwellbeing_1.1','psychwellbeing_2.1','psychwellbeing_3.1','psychwellbeing_5.1',
+                    'average_totalinc_without.2','hermoney.2','hhpurchases.2',NA,NA,NA,NA,
+                    'average_totalinc_without.3','hermoney.3','hhpurchases.3',NA,NA,NA,NA,
+                    'average_totalinc_without.4','hermoney.4','hhpurchases.4','psychwellbeing_1.4','psychwellbeing_2.4','psychwellbeing_3.4','psychwellbeing_5.4',
+                    'average_totalinc_without.5','hermoney.5','hhpurchases.5','psychwellbeing_1.5','psychwellbeing_2.5','psychwellbeing_3.5','psychwellbeing_5.5',
+                    'average_totalinc_without.8','hermoney.8','hhpurchases.8','psychwellbeing_1.8','psychwellbeing_2.8','psychwellbeing_3.8','psychwellbeing_5.8'),7,7, byrow = F) 
+
+
+rownames(varMat1) <- c("Income", "hermoney", "hhpurchases","psychwellbeing_1", "psychwellbeing_2", "psychwellbeing_3", "psychwellbeing_5")
+
+#Model 1
+model2 <- panelgvar(data = Empowerment_wide,
+  vars = varMat1, estimator = "FIML", missing = "pairwise")
+
+# Run model:
+model2 <- model2 %>% runmodel
+
+# Check fit:
+model2 %>% fit 
+
+# Estimation algorithm (prune step):
+model_prune2 <- model2 %>% prune(alpha = 0.05, recursive = FALSE)
+
+##Stepup
+model_pruneSP2 <- model_prune2 %>%  stepup(alpha = 0.05, criterion = "bic")
+
+model_pruneSP2 %>% fit
+
+
+# Compare:
+comp <- compare(
+  original = model2,
+  pruned = model_pruneSP2
+  )
+
+# Differences:
+comp$AIC[1] 
+comp$AIC[2]
+
+comp$BIC[1]
+comp$BIC[2]
+
+temporal <- getmatrix(model_pruneSP2, "PDC")
+contemporaneous <- getmatrix(model_pruneSP2, "omega_zeta_within")
+between <- getmatrix(model_pruneSP2, "omega_zeta_between")
+
+# Average layout:
+Layout <- averageLayout(temporal,contemporaneous,between)
+
+
+# Plot all graphs:
+max <- max(c(abs(temporal),abs(contemporaneous),abs(between)))
+
+
+fig1 <- qgraph(temporal, labels = c("Income", "hermoney", "hhpurchases","WB_1", "WB_2", "WB_3", "WB_5"), title = "Temporal", label.cex = 1, layout = Layout)
+fig2 <- qgraph(contemporaneous, labels = c("Income", "hermoney", "hhpurchases","WB_1", "WB_2", "WB_3", "WB_5"), title = "Contemporaneous",label.cex = 1, layout = Layout)
+fig3 <-qgraph(between,labels = c("Income", "hermoney", "hhpurchases","WB_1", "WB_2", "WB_3", "WB_5"), title = "Between Subjects",label.cex = 1, layout = Layout)
+
+
+png('temporalna.png',height = 10, width = 7, units = 'cm', res = 600)
+plot(fig1)
+dev.off()
+
+
+png('contemporaneousna.png',height = 10, width = 7, units = 'cm', res = 600)
+plot(fig2)
+dev.off()
+
+
+png('betweenna.png',height = 10, width = 7, units = 'cm', res = 600)
+plot(fig3)
+dev.off()
+
+
+```
+
+
+
+ 
+### Robustness Check
+```{r}
+### Create sum scores (for the plot and the descriptives)
+#Psychwellbeing
+index <- which(colnames(All_Rwanda_complete) %in% c("psychwellbeing_1","psychwellbeing_2","psychwellbeing_3","psychwellbeing_4","psychwellbeing_5","psychwellbeing_6","psychwellbeing2_1", "psychwellbeing2_2","psychwellbeing2_3","psychwellbeing2_4","psychwellbeing2_5","psychwellbeing2_6"))
+
+All_Rwanda_complete$PsychologicalWellbeingScaleFull <- rowSums(All_Rwanda_complete[,index])
+
+index <- c("psychwellbeing_1","psychwellbeing_2","psychwellbeing_3","psychwellbeing_5")
+
+All_Rwanda_complete$PsychologicalWellbeingScale <- rowSums(All_Rwanda_complete[,index])
+
+
+#Social Support
+index <- which(colnames(All_Rwanda_complete) %in% c("socialsupport_1","socialsupport_2","socialsupport_3","socialsupport_4"))
+All_Rwanda_complete$SocialSupportScaleFull <- rowSums(All_Rwanda_complete[,index])
+
+
+#Empowerment
+index <- which(colnames(All_Rwanda_complete) %in% c("decisionmaking_1","decisionmaking_2","decisionmaking_4","decisionmaking_3","hermoney","hismoney","hhpurchases","decisionfam"))
+All_Rwanda_complete$EmpowermentScaleFull <- rowSums(All_Rwanda_complete[,index])
+
+index <- which(colnames(All_Rwanda_complete) %in% c("hermoney","hhpurchases"))
+All_Rwanda_complete$EmpowermentScale <- rowSums(All_Rwanda_complete[,index])
+
+
+#Stereotypes
+index <- which(colnames(All_Rwanda_complete) %in% c("stereotypes_1","stereotypes_2","stereotypes_3","stereotypes_4"))
+All_Rwanda_complete$StereotypesScaleFull <- rowSums(All_Rwanda_complete[,index])
+```
+
+
+```{r}
+
+All_Rwanda_complete$Rround[All_Rwanda_complete$Rround == 100] <- 8
+
+
+```
+
+### Robustness Check
+```{r}
+All_Rwanda_lm <- All_Rwanda_complete
+All_Rwanda_lm[,-c(1:2,4,5)] <- scale(All_Rwanda_complete[,-c(1:2,4,5)], center = F) 
+
+#Dependent: PsychologicalWellbeingScale,EmpowermentScale
+
+#Independent
+#Rround, average_totalinc_without
+#Cstartdate,Rgroupnr, ID_NR_VU
+
+###INCOME
+fit1 <- lm(InflationAverage_totalinc_without ~ Rround + as.factor(Cstartdate), All_Rwanda_lm)
+
+###EMPOWERMENT
+fit2 <- lm(EmpowermentScale ~ Rround + InflationAverage_totalinc_without + as.factor(Cstartdate), All_Rwanda_lm)
+
+
+###PSYCHOLOGICAL WELLBEING
+fit3 <- lm(PsychologicalWellbeingScale ~ InflationAverage_totalinc_without + EmpowermentScale + Rround + as.factor(Cstartdate), All_Rwanda_lm)
+
+###TABLE
+fit1_table1 <- invisible(stargazer(fit1, fit2, fit3, type = "html", omit = "Cstartdate", add.lines = list(c("Calendar Month Dummy", "Yes", "Yes", "Yes"))))
+
+###############SUBSAMPLE################
+########################################
+
+
+###SOCIAL SUPPORT
+fit4 <- lm(SocialSupportScaleFull ~ Rround, All_Rwanda_lm)
+
+###EMPOWERMENT
+fit5 <- lm(EmpowermentScaleFull ~ SocialSupportScaleFull + Rround, All_Rwanda_lm)
+
+fit6 <- lm(EmpowermentScaleFull ~ SocialSupportScaleFull + Rround + StereotypesScaleFull, All_Rwanda_lm)
+
+###MENTAL WELLBEING
+fit7 <- lm(PsychologicalWellbeingScaleFull ~ EmpowermentScaleFull + SocialSupportScaleFull + Rround, All_Rwanda_lm)
+
+fit8 <- lm(PsychologicalWellbeingScaleFull ~ EmpowermentScaleFull + SocialSupportScaleFull + StereotypesScaleFull + Rround, All_Rwanda_lm)
+
+fit10 <- lm(PsychologicalWellbeingScaleFull ~ EmpowermentScaleFull*StereotypesScaleFull + SocialSupportScaleFull + Rround, All_Rwanda_lm)
+
+
+###STEREOTYPES
+fit9 <- lm(StereotypesScaleFull ~ SocialSupportScaleFull + Rround, All_Rwanda_lm)
+
+###TABLE
+fit2_table1 <- invisible(stargazer(fit4, fit5, fit6, fit7, fit8, fit9, type = "html", order=c("Rround", "SocialSupportScaleFull","EmpowermentScaleFull","StereotypesScaleFull")))
+
+```
